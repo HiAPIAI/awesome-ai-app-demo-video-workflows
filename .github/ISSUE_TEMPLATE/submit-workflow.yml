@@ -1,0 +1,28 @@
+name: Submit a workflow
+description: Propose an original app demo workflow.
+title: "[Workflow]: "
+labels: [workflow]
+body:
+  - type: input
+    id: use-case
+    attributes:
+      label: Use case
+      description: What product story does this workflow demonstrate?
+    validations:
+      required: true
+  - type: textarea
+    id: assets
+    attributes:
+      label: Asset rights
+      description: Explain who created every screenshot, logo, font, and audio asset and which license applies.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: The workflow uses no credentials, signed URLs, or private customer data.
+          required: true
+        - label: I reviewed the complete rendered video.
+          required: true

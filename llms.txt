@@ -1,0 +1,7 @@
+# Awesome AI App Demo Video Workflows
+
+Purpose: deterministic app-demo video workflows with optional HiAPI-generated non-UI enhancements.
+Source contract: schemas/demo-v1.schema.json
+Compiled contract: schemas/compiled-demo-v1.schema.json
+Agent guide: AGENTS.md
+Contribution guide: CONTRIBUTING.md
