@@ -15,6 +15,7 @@ const publicDocs = [
   'llms.txt',
   'docs/setup.md',
   'docs/authoring.md',
+  'docs/acceptance-matrix.md',
   'docs/schema-reference.md',
   'docs/hiapi-safety.md',
   'docs/launch-kit.md',
@@ -114,6 +115,7 @@ for (const entry of catalog.workflows) {
   assert.equal(validateSource(demo), true, `${entry.id} schema errors: ${JSON.stringify(validateSource.errors)}`);
   assert.equal(demo.project.id, entry.id, `${entry.id} project ID must match catalog`);
   assert.equal(demo.canvas.durationFrames / demo.canvas.fps, entry.durationSeconds, `${entry.id} duration must match catalog`);
+  assert.equal(demo.hiapi?.enabled, false, `${entry.id} must keep HiAPI disabled before integrated review`);
 
   const assetIds = demo.assets.map(({id}) => id);
   unique(assetIds, `${entry.id} asset IDs`);
@@ -167,6 +169,24 @@ for (const entry of catalog.workflows) {
       assertReference(assetIdSet, inputAssetId, `${entry.id}/${enhancement.id}`);
     }
   }
+
+  if (entry.id === 'saas-feature-launch') {
+    const audioAssets = new Map(demo.assets.filter(({type}) => type === 'audio').map((asset) => [asset.id, asset]));
+    assert.equal(audioAssets.get('background-music')?.path, 'assets/audio/bgm/bgm_003.wav');
+    assert.equal(audioAssets.get('background-music')?.license, 'MIT');
+    assert.equal(audioAssets.get('ui-click')?.path, 'assets/audio/sfx/sfx_001.mp3');
+    assert.equal(audioAssets.get('ui-click')?.license, 'Pixabay Content License');
+    assert.equal(audioAssets.get('result-chime')?.path, 'assets/audio/sfx/sfx_002.mp3');
+    assert.equal(audioAssets.get('result-chime')?.license, 'Pixabay Content License');
+    assert.equal(JSON.stringify(demo).includes('bgm_001'), false, 'rejected bgm_001 must not be referenced');
+    assert.equal(JSON.stringify(demo).includes('bgm_002'), false, 'rejected bgm_002 must not be referenced');
+    assert.deepEqual(demo.audio, [
+      {id: 'music-bed', assetId: 'background-music', startFrame: 0, volume: 0.65, fadeInFrames: 12, fadeOutFrames: 24},
+      {id: 'dashboard-click', assetId: 'ui-click', startFrame: 107, volume: 1},
+      {id: 'builder-click', assetId: 'ui-click', startFrame: 219, volume: 1},
+      {id: 'result-confirmation', assetId: 'result-chime', startFrame: 255, volume: 1},
+    ], 'SaaS sample audio plan must stay frozen');
+  }
 }
 
 for (const svgFile of svgFiles) {
@@ -181,6 +201,14 @@ for (const svgFile of svgFiles) {
 const readmes = await Promise.all(['README.md', 'README.zh-CN.md'].map(readText));
 for (const {id} of catalog.workflows) {
   for (const readme of readmes) assert(readme.includes(`examples/${id}/`), `README must list ${id}`);
+}
+
+const acceptanceMatrix = await readText('docs/acceptance-matrix.md');
+for (const {path: workflowPath} of catalog.workflows) {
+  const demo = parse(await readText(`${workflowPath}/demo.yaml`));
+  for (const output of demo.outputs) {
+    assert(acceptanceMatrix.includes(`\`${output.fileName}\``), `acceptance matrix must list ${output.fileName}`);
+  }
 }
 
 const publicText = (await Promise.all(publicDocs.map(readText))).join('\n');

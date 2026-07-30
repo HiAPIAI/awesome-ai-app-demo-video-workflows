@@ -6,5 +6,11 @@
 - [ ] Confirm the callout does not cover node labels or the publish control.
 - [ ] Confirm all screenshot text remains sharp and uncropped.
 - [ ] Confirm the vertical adaptation keeps the active workflow node in view.
+- [ ] Confirm there is no narration in either output.
+- [ ] Confirm the music fades in over frames 0-11 and fades out over the final 24 frames without an abrupt edge.
+- [ ] Confirm click cues land at global frames 107 and 219, and the result chime starts at frame 255.
+- [ ] Confirm final EBU R128 integrated loudness is approximately -24 to -20 LUFS and true peak is at or below -1 dBFS; reject clipping or cues masked by the normalized four-track mix.
+- [ ] Listen at normal volume and confirm the BGM stays low-presence while both clicks and the result chime remain clear.
+- [ ] Confirm neither the compiled manifest nor the repository references `bgm_001` or `bgm_002`.
 - [ ] Confirm no generated background or transition redraws the product UI.
 - [ ] Record any timing, framing, or readability deviation before marking the workflow verified.

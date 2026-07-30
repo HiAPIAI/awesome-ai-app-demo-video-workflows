@@ -4,7 +4,7 @@
 
 Open, reproducible workflows for turning app screenshots and exported UI prototype states into product demo videos. Product UI stays deterministic; optional HiAPI generation is limited to non-critical backgrounds, intros, transitions, and outros.
 
-[简体中文](README.zh-CN.md) · [Setup](docs/setup.md) · [Authoring](docs/authoring.md) · [Schema reference](docs/schema-reference.md) · [HiAPI safety](docs/hiapi-safety.md)
+[简体中文](README.zh-CN.md) · [Setup](docs/setup.md) · [Authoring](docs/authoring.md) · [Schema reference](docs/schema-reference.md) · [Render acceptance](docs/acceptance-matrix.md) · [HiAPI safety](docs/hiapi-safety.md)
 
 > Integration status: the `demo-v1` and `compiled-demo-v1` contracts and CLI names are frozen. The examples below are `spec-only` until the core and render branches are integrated and each complete export passes human review.
 
