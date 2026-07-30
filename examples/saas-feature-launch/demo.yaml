@@ -90,8 +90,8 @@ scenes:
       to: {x: 1110, y: 575}
       clickFrames: [84]
     callouts:
-      - text: Test every branch before publishing
-        at: {x: 1080, y: 380}
+      - text: Test every branch
+        at: {x: 750, y: 790}
         startFrame: 42
         durationFrames: 56
         accent: "#2D8CFF"
