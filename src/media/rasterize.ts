@@ -20,10 +20,17 @@ export async function rasterizeSvgAssets(
     if (!asset.verifiedSvg) throw new Error(`SVG asset ${asset.id} was not retained after integrity verification.`);
 
     const outputPath = join(outputDirectory, `${asset.sha256}.png`);
-    await sharp(asset.verifiedSvg, {density: 96, limitInputPixels: MAX_SVG_PIXELS})
+    const sourceMetadata = await sharp(asset.verifiedSvg, {limitInputPixels: MAX_SVG_PIXELS}).metadata();
+    const image = sharp(asset.verifiedSvg, {density: 96, limitInputPixels: MAX_SVG_PIXELS});
+    await image
       .png({compressionLevel: 9, adaptiveFiltering: false, palette: false, effort: 10})
       .toFile(outputPath);
-    prepared.set(id, {...asset, absolutePath: outputPath});
+    prepared.set(id, {
+      ...asset,
+      absolutePath: outputPath,
+      ...(asset.width === undefined && sourceMetadata.width !== undefined ? {width: sourceMetadata.width} : {}),
+      ...(asset.height === undefined && sourceMetadata.height !== undefined ? {height: sourceMetadata.height} : {}),
+    });
   }
 
   return prepared;
