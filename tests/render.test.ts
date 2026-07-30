@@ -5,8 +5,16 @@ import {access, mkdtemp, readdir, readFile, rm, stat, writeFile} from 'node:fs/p
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
+import sharp from 'sharp';
 import {buildFfmpegComposition} from '../src/compositions/ffmpeg-composition.js';
 import {interpolateFrame} from '../src/compositions/frame-math.js';
+import {
+  mapPointThroughVisual,
+  screenRect,
+  titleTextLayout,
+  visualFitTransform,
+  visualFocusPoint,
+} from '../src/compositions/layout.js';
 import type {CompiledDemoV1} from '../src/contracts/types.js';
 import {parseRenderArguments} from '../src/cli/render.js';
 import {resolveAndVerifyAssets} from '../src/media/assets.js';
@@ -43,6 +51,93 @@ async function renderWorkDirectories(path: string): Promise<string[]> {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
     throw error;
   }
+}
+
+async function extractFrame(videoPath: string, frame: number, destination: string): Promise<void> {
+  await command('ffmpeg', [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    videoPath,
+    '-vf',
+    `select=eq(n\\,${frame})`,
+    '-frames:v',
+    '1',
+    '-fps_mode',
+    'passthrough',
+    '-threads',
+    '1',
+    destination,
+  ]);
+}
+
+interface PixelImage {
+  data: Buffer;
+  width: number;
+  height: number;
+  channels: number;
+}
+
+async function readPixels(path: string): Promise<PixelImage> {
+  const {data, info} = await sharp(path).removeAlpha().raw().toBuffer({resolveWithObject: true});
+  return {data, width: info.width, height: info.height, channels: info.channels};
+}
+
+function isDark(image: PixelImage, x: number, y: number): boolean {
+  const offset = (y * image.width + x) * image.channels;
+  return (image.data[offset] ?? 255) < 100 && (image.data[offset + 1] ?? 255) < 100 &&
+    (image.data[offset + 2] ?? 255) < 100;
+}
+
+function darkBounds(image: PixelImage): {minX: number; minY: number; maxX: number; maxY: number} {
+  let minX = image.width;
+  let minY = image.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (!isDark(image, x, y)) continue;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  assert.ok(maxX >= 0 && maxY >= 0, 'expected the rendered frame to contain dark text pixels');
+  return {minX, minY, maxX, maxY};
+}
+
+function longestDarkRun(image: PixelImage, x: number, startY: number, endY: number): number {
+  let longest = 0;
+  let current = 0;
+  for (let y = startY; y <= endY; y += 1) {
+    if (isDark(image, x, y)) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
+}
+
+function hasAccentPixelNear(image: PixelImage, x: number, y: number, radius: number): boolean {
+  for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
+    for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+      if (offsetX * offsetX + offsetY * offsetY > radius * radius) continue;
+      const pixelX = Math.round(x + offsetX);
+      const pixelY = Math.round(y + offsetY);
+      if (pixelX < 0 || pixelX >= image.width || pixelY < 0 || pixelY >= image.height) continue;
+      const offset = (pixelY * image.width + pixelX) * image.channels;
+      const red = image.data[offset] ?? 0;
+      const green = image.data[offset + 1] ?? 255;
+      const blue = image.data[offset + 2] ?? 255;
+      if (red > 150 && green < 140 && blue < 140 && red - green > 45) return true;
+    }
+  }
+  return false;
 }
 
 test('frame interpolation is deterministic and bounded by frame progress', () => {
@@ -127,7 +222,7 @@ test('keeps long headings, body copy, and callouts inside landscape and portrait
 
     const headingMatch = headingFilter.match(/fontsize=(\d+):line_spacing=(\d+):x=.*:y=(\d+)/u);
     const bodyMatch = bodyFilter.match(/fontsize=(\d+):line_spacing=(\d+):x=.*:y=(\d+)/u);
-    const boxMatch = calloutBox.match(/drawbox=x=(\d+):y=(\d+):w=(\d+):h=(\d+):color/u);
+    const boxMatch = calloutBox.match(/drawbox=x=(-?\d+(?:\.\d+)?):y=(-?\d+(?:\.\d+)?):w=(\d+):h=(\d+):color/u);
     assert.ok(headingMatch);
     assert.ok(bodyMatch);
     assert.ok(boxMatch);
@@ -190,8 +285,8 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
         fontFamily: 'Arial',
       },
       assets: [
-        {id: 'screen-a', type: 'image', path: 'screen-a.svg', width: 640, height: 360, ...firstRecord},
-        {id: 'screen-b', type: 'image', path: 'screen-b.svg', width: 360, height: 640, ...secondRecord},
+        {id: 'screen-a', type: 'image', path: 'screen-a.svg', ...firstRecord},
+        {id: 'screen-b', type: 'image', path: 'screen-b.svg', ...secondRecord},
         {id: 'tone', type: 'audio', path: 'tone.wav', durationSeconds: 1, ...audioRecord},
       ],
       scenes: [
@@ -201,8 +296,8 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
           startFrame: 0,
           endFrame: 6,
           durationFrames: 6,
-          heading: 'Frame-owned demo',
-          body: 'Deterministic local layers',
+          heading: 'Automations, without the busywork',
+          body: 'Build, test, and ship a customer journey from one canvas.',
           transitionIn: 'fade',
         },
         {
@@ -214,15 +309,14 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
           assetId: 'screen-a',
           heading: 'Screenshot pan and crop',
           body: 'UI pixels stay local and unchanged',
-          fit: 'cover',
-          from: {x: -12, y: 4, scale: 0.96, opacity: 0},
+          fit: 'contain',
+          from: {x: -12, y: 4, scale: 0.96, opacity: 1},
           to: {x: 12, y: -4, scale: 1.08, opacity: 1},
           easing: 'ease-out',
           transitionIn: 'slide-left',
-          transitionOut: 'fade',
-          cursor: {from: {x: 120, y: 100}, to: {x: 420, y: 220}, clickFrames: [12]},
+          cursor: {from: {x: 120, y: 100}, to: {x: 420, y: 220}, clickFrames: [6]},
           callouts: [
-            {text: 'Local callout', at: {x: 300, y: 60}, startFrame: 10, durationFrames: 5},
+            {text: 'Local callout', at: {x: 300, y: 60}, startFrame: 4, durationFrames: 5},
           ],
         },
         {
@@ -233,7 +327,7 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
           durationFrames: 4,
           assetId: 'screen-a',
           secondaryAssetId: 'screen-b',
-          fit: 'contain',
+          fit: 'cover',
           transitionIn: 'scale',
         },
         {
@@ -275,6 +369,13 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
       assert.equal(prepared.sha256, original.sha256);
       assert.equal(prepared.bytes, original.bytes);
     }
+    assert.deepEqual(
+      ['screen-a', 'screen-b'].map((id) => {
+        const asset = preparedAssets.get(id)!;
+        return [asset.width, asset.height];
+      }),
+      [[640, 360], [360, 640]],
+    );
     const composition = buildFfmpegComposition({
       compiled,
       output: compiled.outputs[0]!,
@@ -337,6 +438,69 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
     assert.deepEqual(
       JSON.parse(await readFile(compiledPath, 'utf8')).assets.map((asset: {path: string}) => asset.path),
       ['screen-a.svg', 'screen-b.svg', 'tone.wav'],
+    );
+
+    for (const output of compiled.outputs) {
+      const titleFrame = join(fixtureDirectory, `${output.id}-title.png`);
+      await extractFrame(join(firstOutput, output.fileName), 3, titleFrame);
+      const pixels = await readPixels(titleFrame);
+      const layout = titleTextLayout(output.width, output.height, compiled.scenes[0]!.heading!, compiled.scenes[0]!.body);
+      const bounds = darkBounds(pixels);
+      assert.ok(bounds.minX >= Math.floor((output.width - layout.safeWidth) / 2) - 3);
+      assert.ok(bounds.maxX <= Math.ceil((output.width + layout.safeWidth) / 2) + 3);
+      assert.ok(bounds.minY >= layout.safeTop - 3);
+      assert.ok(bounds.maxY <= layout.safeBottom + 3);
+      assert.ok(layout.bodyY);
+    }
+
+    const portraitScreenFrame = join(fixtureDirectory, 'portrait-screen.png');
+    await extractFrame(join(firstOutput, 'portrait.mp4'), 12, portraitScreenFrame);
+    const portraitPixels = await readPixels(portraitScreenFrame);
+    const portraitRect = screenRect(324, 576, compiled.canvas.width / compiled.canvas.height);
+    const centerX = Math.floor(portraitPixels.width / 2);
+    assert.ok(longestDarkRun(portraitPixels, centerX, portraitRect.y, portraitRect.y + portraitRect.height - 1) < 24);
+    assert.equal(isDark(portraitPixels, centerX, portraitRect.y + 20), false);
+    assert.equal(isDark(portraitPixels, centerX, portraitRect.y + portraitRect.height - 21), false);
+
+    const screenScene = compiled.scenes[1]!;
+    const localClick = screenScene.cursor!.clickFrames![0]!;
+    const focus = visualFocusPoint(
+      [screenScene.cursor!.from, screenScene.cursor!.to, screenScene.callouts![0]!.at],
+      640,
+      360,
+    );
+    const visualTransform = visualFitTransform(640, 360, portraitRect, 'cover', focus);
+    const sourceClick = {
+      x: interpolateFrame(
+        screenScene.cursor!.from.x,
+        screenScene.cursor!.to.x,
+        localClick,
+        screenScene.durationFrames,
+        screenScene.easing!,
+      ),
+      y: interpolateFrame(
+        screenScene.cursor!.from.y,
+        screenScene.cursor!.to.y,
+        localClick,
+        screenScene.durationFrames,
+        screenScene.easing!,
+      ),
+    };
+    const visualScale = interpolateFrame(
+      screenScene.from!.scale!,
+      screenScene.to!.scale!,
+      localClick,
+      screenScene.durationFrames,
+      screenScene.easing!,
+    );
+    const expectedClick = mapPointThroughVisual(sourceClick, visualTransform, visualScale, {
+      x: interpolateFrame(-12, 12, localClick, screenScene.durationFrames, screenScene.easing!) * (324 / 576),
+      y: interpolateFrame(4, -4, localClick, screenScene.durationFrames, screenScene.easing!) * (576 / 324),
+    });
+    assert.equal(
+      hasAccentPixelNear(portraitPixels, expectedClick.x, expectedClick.y, 24),
+      true,
+      `expected click ripple near (${expectedClick.x.toFixed(1)}, ${expectedClick.y.toFixed(1)})`,
     );
 
     const tamperedSvg = landscapeSvg.toString('utf8').replace('#f4f6f8', '#f5f6f8');
