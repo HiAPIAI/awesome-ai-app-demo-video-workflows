@@ -88,3 +88,21 @@ export function transitionScaleExpression(
   }
   return factors.length === 0 ? '1' : factors.join('*');
 }
+
+export function transitionScaleAtFrame(
+  transitionIn: Transition | undefined,
+  transitionOut: Transition | undefined,
+  frame: number,
+  durationFrames: number,
+): number {
+  const transitionFrames = Math.min(TRANSITION_FRAMES, Math.max(1, Math.floor(durationFrames / 3)));
+  let scale = 1;
+  if (transitionIn === 'scale') {
+    scale *= 0.92 + 0.08 * clamp(frame / transitionFrames, 0, 1);
+  }
+  if (transitionOut === 'scale') {
+    const start = durationFrames - transitionFrames;
+    scale *= 1 - 0.08 * clamp((frame - start) / transitionFrames, 0, 1);
+  }
+  return scale;
+}

@@ -51,3 +51,4 @@ export function createCursorRgba(): Uint8Array {
 }
 
 export const CURSOR_RGBA_SIZE = CURSOR_SIZE;
+export const CURSOR_RGBA_HOTSPOT = {x: 5, y: 3} as const;
