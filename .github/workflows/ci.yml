@@ -20,5 +20,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - run: npm ci
       - run: npm test
