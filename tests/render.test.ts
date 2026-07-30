@@ -109,6 +109,16 @@ function darkBounds(image: PixelImage): {minX: number; minY: number; maxX: numbe
   return {minX, minY, maxX, maxY};
 }
 
+function countDarkPixels(image: PixelImage, startY: number, endY: number): number {
+  let count = 0;
+  for (let y = Math.max(0, startY); y < Math.min(image.height, endY); y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (isDark(image, x, y)) count += 1;
+    }
+  }
+  return count;
+}
+
 function longestDarkRun(image: PixelImage, x: number, startY: number, endY: number): number {
   let longest = 0;
   let current = 0;
@@ -215,14 +225,18 @@ test('keeps long headings, body copy, and callouts inside landscape and portrait
     const calloutBox = composition.filterGraph
       .split(';\n')
       .find((filter) => filter.includes('[calloutBox'));
+    const calloutSource = composition.filterGraph
+      .split(';\n')
+      .find((filter) => filter.includes('[calloutSource'));
     assert.ok(headingText);
     assert.ok(headingFilter);
     assert.ok(bodyFilter);
     assert.ok(calloutBox);
+    assert.ok(calloutSource);
 
     const headingMatch = headingFilter.match(/fontsize=(\d+):line_spacing=(\d+):x=.*:y=(\d+)/u);
     const bodyMatch = bodyFilter.match(/fontsize=(\d+):line_spacing=(\d+):x=.*:y=(\d+)/u);
-    const boxMatch = calloutBox.match(/drawbox=x=(-?\d+(?:\.\d+)?):y=(-?\d+(?:\.\d+)?):w=(\d+):h=(\d+):color/u);
+    const boxMatch = calloutSource.match(/:s=(\d+)x(\d+):r=/u);
     assert.ok(headingMatch);
     assert.ok(bodyMatch);
     assert.ok(boxMatch);
@@ -237,12 +251,10 @@ test('keeps long headings, body copy, and callouts inside landscape and portrait
     assert.ok(headingLines.length >= (output.id === 'portrait' ? 4 : 3));
     assert.ok(bodyY >= headingY + headingHeight + Math.max(24, Math.round(bodySize * 0.65)));
 
-    const [boxX, boxY, boxWidth, boxHeight] = boxMatch.slice(1).map(Number) as [number, number, number, number];
+    const [boxWidth, boxHeight] = boxMatch.slice(1).map(Number) as [number, number];
     const safeMargin = Math.max(12, Math.round(Math.min(output.width, output.height) * 0.025));
-    assert.ok(boxX >= safeMargin);
-    assert.ok(boxY >= safeMargin);
-    assert.ok(boxX + boxWidth <= output.width - safeMargin);
-    assert.ok(boxY + boxHeight <= output.height - safeMargin);
+    assert.match(calloutBox, new RegExp(`overlay=x='max\\(${safeMargin},min\\(${output.width - safeMargin - boxWidth},`));
+    assert.match(calloutBox, new RegExp(`:y='max\\(${safeMargin},min\\(${output.height - safeMargin - boxHeight},`));
   }
 });
 
@@ -451,6 +463,15 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
       assert.ok(bounds.minY >= layout.safeTop - 3);
       assert.ok(bounds.maxY <= layout.safeBottom + 3);
       assert.ok(layout.bodyY);
+      const gapDarkPixels = countDarkPixels(
+        pixels,
+        layout.headingY + layout.heading.height + 3,
+        layout.bodyY - 3,
+      );
+      assert.ok(
+        gapDarkPixels <= Math.ceil(output.width * 0.1),
+        `expected only negligible H.264 edge ringing between heading and body, found ${gapDarkPixels} pixels`,
+      );
     }
 
     const portraitScreenFrame = join(fixtureDirectory, 'portrait-screen.png');

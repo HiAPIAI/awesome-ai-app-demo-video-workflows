@@ -40,6 +40,9 @@ test('portrait screen viewport uses a focused 4:5 frame for a landscape canvas',
   const portrait = screenRect(1080, 1920, 16 / 9);
   assert.deepEqual(portrait, {x: 65, y: 367, width: 950, height: 1186});
   assert.ok(Math.abs(portrait.width / portrait.height - 0.8) < 0.002);
+  const completePortrait = screenRect(1080, 1920, 16 / 10, false);
+  assert.deepEqual(completePortrait, {x: 65, y: 663, width: 950, height: 594});
+  assert.ok(Math.abs(completePortrait.width / completePortrait.height - 16 / 10) < 0.002);
 });
 
 test('filtergraph converts scene-local callout and click frames and focuses portrait screens', () => {
@@ -64,6 +67,15 @@ test('filtergraph converts scene-local callout and click frames and focuses port
         type: 'image',
         path: 'builder.png',
         sha256: '2'.repeat(64),
+        bytes: 1,
+        width: 1440,
+        height: 900,
+      },
+      {
+        id: 'results',
+        type: 'image',
+        path: 'results.png',
+        sha256: '3'.repeat(64),
         bytes: 1,
         width: 1440,
         height: 900,
@@ -98,6 +110,15 @@ test('filtergraph converts scene-local callout and click frames and focuses port
           },
         ],
       },
+      {
+        id: 'prove-impact',
+        kind: 'screen',
+        startFrame: 255,
+        endFrame: 300,
+        durationFrames: 45,
+        assetId: 'results',
+        fit: 'contain',
+      },
     ],
     audio: [],
     outputs: [{id: 'vertical', width: 1080, height: 1920, fps: 30, fileName: 'vertical.mp4'}],
@@ -111,6 +132,10 @@ test('filtergraph converts scene-local callout and click frames and focuses port
     [
       'builder',
       {...compiled.assets[1]!, absolutePath: 'C:\\fixtures\\builder.png'},
+    ],
+    [
+      'results',
+      {...compiled.assets[2]!, absolutePath: 'C:\\fixtures\\results.png'},
     ],
   ]);
   const composition = buildFfmpegComposition({
@@ -130,8 +155,8 @@ test('filtergraph converts scene-local callout and click frames and focuses port
   assert.doesNotMatch(composition.filterGraph, /\(n-84\)/u);
   assert.equal((composition.filterGraph.match(/crop=w=950:h=1186/gu) ?? []).length, 2);
   assert.match(composition.filterGraph, /iw\*0\.641204-ow\/2/u);
-  assert.equal(composition.filterGraph.includes('force_original_aspect_ratio=decrease'), false);
   assert.equal(composition.filterGraph.includes('pad=950:1186'), false);
+  assert.equal(composition.filterGraph.includes('pad=950:594'), true);
 
   const builderPoints = [
     compiled.scenes[1]!.cursor!.from,
@@ -188,7 +213,5 @@ test('comparison callouts retain canvas-space placement without binding to the l
   });
   const calloutBox = composition.filterGraph.split(';\n').find((filter) => filter.includes('[calloutBox'));
   assert.ok(calloutBox);
-  const match = calloutBox.match(/drawbox=x=(-?\d+(?:\.\d+)?):/u);
-  assert.ok(match);
-  assert.ok(Number(match[1]) > compiled.canvas.width / 2);
+  assert.match(calloutBox, /\+\(1400\)\*1/u);
 });
