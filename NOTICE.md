@@ -4,7 +4,7 @@ Repository code, documentation, and the fictional example UI assets included in 
 
 The names Northstar, Luma, Relay, Ledger, and Clipnote, together with their depicted interfaces, are fictional examples created for this repository. They do not represent customers, endorsements, or production services.
 
-`examples/saas-feature-launch/assets/audio/bgm/bgm_003.wav` is an original deterministic local synthesis released under MIT. `sfx_001.mp3` and `sfx_002.mp3` come from the `media-use` bundled SFX library, originate from Pixabay, and retain the [Pixabay Content License](https://pixabay.com/service/license-summary/). That license permits commercial and non-commercial use, modification, and distribution as part of derivative works without mandatory attribution. The files use library keys `click` and `chime`; they are not represented as original repository recordings or relicensed under MIT.
+The three WAV files under `examples/saas-feature-launch/assets/audio/` are original deterministic local syntheses created for this repository and released under MIT. `generate.mjs` contains the complete formula and RIFF encoder for the two sound effects; their checked-in bytes and SHA-256 values can be reproduced locally without a network service or third-party media.
 
 Motion Canvas packages are MIT licensed. FFmpeg and FFprobe are external executables and remain subject to the licenses and build configuration of the versions installed by each user. Their presence in the documented toolchain does not relicense them under this repository's MIT License.
 
