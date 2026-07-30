@@ -229,7 +229,8 @@ function wrapTextToWidth(value: string, fontSize: number, maximumWidth: number):
 
 function textBlockHeight(value: string, fontSize: number): number {
   const lineCount = value.split('\n').length;
-  return lineCount * fontSize + Math.max(0, lineCount - 1) * lineSpacing(fontSize);
+  const baselineStep = Math.ceil(fontSize * 1.3) + lineSpacing(fontSize);
+  return fontSize + Math.max(0, lineCount - 1) * baselineStep;
 }
 
 export function buildFfmpegComposition(options: CompositionOptions): FfmpegComposition {
@@ -417,8 +418,9 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
       const asset = assets.get(scene.assetId);
       if (!asset) throw new Error(`Scene ${scene.id} references missing asset ${scene.assetId}.`);
       const sourceAspectRatio = (asset.width ?? compiled.canvas.width) / (asset.height ?? compiled.canvas.height);
-      const responsivePortraitFocus = height > width && sourceAspectRatio > 1;
-      const rect = screenRect(width, height, sourceAspectRatio);
+      const hasFocusPoints = scene.cursor !== undefined || (scene.callouts?.length ?? 0) > 0;
+      const responsivePortraitFocus = height > width && sourceAspectRatio > 1 && hasFocusPoints;
+      const rect = screenRect(width, height, sourceAspectRatio, responsivePortraitFocus);
       drawDeviceFrame(rect, sceneStart, sceneEnd - 1);
       sceneVisualTransform = addVisual(scene, scene.assetId, rect, responsivePortraitFocus);
     } else if (scene.kind === 'comparison' && scene.assetId && scene.secondaryAssetId) {
@@ -557,34 +559,12 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
     }
 
     for (const callout of scene.callouts ?? []) {
-      const outputLocalStart = frameAtOutput(callout.startFrame, sourceFps, fps);
-      const calloutStart = sceneStart + outputLocalStart;
+      const calloutStart = sceneStart + frameAtOutput(callout.startFrame, sourceFps, fps);
       const calloutEnd = Math.min(
         sceneEnd - 1,
         sceneStart + frameAtOutput(callout.startFrame + callout.durationFrames, sourceFps, fps) - 1,
       );
-      const visualScale = interpolateFrame(fromScale, toScale, outputLocalStart, sceneDuration, sceneEasing) *
-        transitionScaleAtFrame(scene.transitionIn, scene.transitionOut, outputLocalStart, sceneDuration);
-      const mappedPosition = mapPointThroughVisual(callout.at, overlayTransform, visualScale, {
-        x: interpolateFrame(xFrom, xTo, outputLocalStart, sceneDuration, sceneEasing),
-        y: interpolateFrame(yFrom, yTo, outputLocalStart, sceneDuration, sceneEasing),
-      });
-      const requestedX = mappedPosition.x + slideOffsetAtFrame(
-        width,
-        scene.transitionIn,
-        scene.transitionOut,
-        outputLocalStart,
-        sceneDuration,
-        'horizontal',
-      );
-      const requestedY = mappedPosition.y + slideOffsetAtFrame(
-        height,
-        scene.transitionIn,
-        scene.transitionOut,
-        outputLocalStart,
-        sceneDuration,
-        'vertical',
-      );
+      const position = mapOverlayPoint(callout.at.x, callout.at.y);
       const calloutSize = Math.max(16, Math.round(Math.min(width, height) * 0.032));
       const calloutPaddingX = 14;
       const calloutPaddingY = 8;
@@ -601,13 +581,18 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
       );
       const boxHeight = textBlockHeight(wrapped, calloutSize) + calloutPaddingY * 2;
       const calloutSafeMargin = Math.max(12, Math.round(Math.min(width, height) * 0.025));
-      const x = clamp(requestedX, calloutSafeMargin, width - calloutSafeMargin - boxWidth);
-      const y = clamp(requestedY, calloutSafeMargin, height - calloutSafeMargin - boxHeight);
+      const x = `max(${calloutSafeMargin},min(${width - calloutSafeMargin - boxWidth},${position.x}))`;
+      const y = `max(${calloutSafeMargin},min(${height - calloutSafeMargin - boxHeight},${position.y}))`;
       const calloutColor = callout.accent ? color(callout.accent, `callout ${callout.text}`) : accent;
+      const boxSource = `calloutSource${labelIndex++}`;
       const boxLabel = `calloutBox${labelIndex++}`;
       filters.push(
-        `[${current}]drawbox=x=${decimal(x)}:y=${decimal(y)}:w=${boxWidth}:h=${boxHeight}:` +
-          `color=${calloutColor}@0.92:t=fill:` +
+        `color=c=${calloutColor}@0.92:s=${boxWidth}x${boxHeight}:r=${fps}:` +
+          `d=${decimal((calloutEnd - calloutStart + 1) / fps)},format=rgba,` +
+          `setpts=PTS+${calloutStart}/${fps}/TB[${boxSource}]`,
+      );
+      filters.push(
+        `[${current}][${boxSource}]overlay=x='${x}':y='${y}':eof_action=pass:repeatlast=0:` +
           `enable='between(n,${calloutStart},${calloutEnd})'[${boxLabel}]`,
       );
       current = boxLabel;
@@ -616,8 +601,8 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
         text: wrapped,
         color: 'white',
         size: calloutSize,
-        x: decimal(x + calloutPaddingX),
-        y: decimal(y + calloutPaddingY),
+        x: `'(${x})+${calloutPaddingX}'`,
+        y: `'(${y})+${calloutPaddingY}'`,
         start: calloutStart,
         end: calloutEnd,
       });
