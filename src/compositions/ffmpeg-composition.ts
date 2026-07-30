@@ -9,14 +9,26 @@ import type {
   Transition,
 } from '../contracts/types.js';
 import type {ResolvedAsset} from '../media/assets.js';
+import {CURSOR_RGBA_HOTSPOT} from '../media/generated.js';
 import {
   TRANSITION_FRAMES,
+  clamp,
   interpolateExpression,
   interpolateFrame,
   transformValue,
+  transitionScaleAtFrame,
   transitionScaleExpression,
 } from './frame-math.js';
-import {comparisonRects, screenRect, type ContentRect} from './layout.js';
+import {
+  comparisonRects,
+  mapPointThroughVisual,
+  screenRect,
+  titleTextLayout,
+  visualFitTransform,
+  visualFocusPoint,
+  type ContentRect,
+  type VisualFitTransform,
+} from './layout.js';
 
 export interface TextFileSpec {
   path: string;
@@ -84,15 +96,20 @@ function assetInputArgs(asset: ResolvedAsset, fps: number): string[] {
   throw new Error(`Asset ${asset.id} cannot be used as a visual layer because it is ${asset.type}.`);
 }
 
-function fitFilters(rect: ContentRect, fit: FitMode): string[] {
+function fitFilters(rect: ContentRect, fit: FitMode, focus?: {x: number; y: number}): string[] {
   const size = `w=${rect.width}:h=${rect.height}`;
   if (fit === 'fill') {
     return [`scale=${size}`];
   }
   if (fit === 'cover') {
+    const crop = focus
+      ? `crop=w=${rect.width}:h=${rect.height}:` +
+        `x='max(0,min(iw-ow,iw*${decimal(focus.x)}-ow/2))':` +
+        `y='max(0,min(ih-oh,ih*${decimal(focus.y)}-oh/2))'`
+      : `crop=${rect.width}:${rect.height}`;
     return [
       `scale=${size}:force_original_aspect_ratio=increase:force_divisible_by=2`,
-      `crop=${rect.width}:${rect.height}`,
+      crop,
     ];
   }
   return [
@@ -154,15 +171,43 @@ function slideExpression(
   return expression;
 }
 
+function slideOffsetAtFrame(
+  distance: number,
+  transitionIn: Transition | undefined,
+  transitionOut: Transition | undefined,
+  frame: number,
+  durationFrames: number,
+  kind: 'horizontal' | 'vertical',
+): number {
+  const expected = kind === 'horizontal' ? 'slide-left' : 'slide-up';
+  const transitionFrames = Math.min(TRANSITION_FRAMES, Math.max(1, Math.floor(durationFrames / 3)));
+  let offset = 0;
+  if (transitionIn === expected) offset -= distance * (1 - clamp(frame / transitionFrames, 0, 1));
+  if (transitionOut === expected) {
+    offset -= distance * clamp((frame - (durationFrames - transitionFrames)) / transitionFrames, 0, 1);
+  }
+  return offset;
+}
+
 function wrapText(value: string, maximumCharacters: number): string {
   const words = value.trim().split(/\s+/u);
-  if (words.length === 1 && (words[0]?.length ?? 0) > maximumCharacters) {
-    return value.match(new RegExp(`.{1,${maximumCharacters}}`, 'gu'))?.join('\n') ?? value;
-  }
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
-    if (line.length > 0 && line.length + word.length + 1 > maximumCharacters) {
+    const characters = Array.from(word);
+    if (characters.length > maximumCharacters) {
+      if (line.length > 0) {
+        lines.push(line);
+        line = '';
+      }
+      while (characters.length > maximumCharacters) {
+        lines.push(characters.splice(0, maximumCharacters).join(''));
+      }
+      line = characters.join('');
+    } else if (
+      line.length > 0 &&
+      Array.from(line).length + characters.length + 1 > maximumCharacters
+    ) {
       lines.push(line);
       line = word;
     } else {
@@ -171,6 +216,20 @@ function wrapText(value: string, maximumCharacters: number): string {
   }
   if (line.length > 0) lines.push(line);
   return lines.join('\n');
+}
+
+function lineSpacing(fontSize: number): number {
+  return Math.max(4, Math.round(fontSize * 0.25));
+}
+
+function wrapTextToWidth(value: string, fontSize: number, maximumWidth: number): string {
+  const averageGlyphWidth = fontSize * 0.62;
+  return wrapText(value, Math.max(1, Math.floor(maximumWidth / averageGlyphWidth)));
+}
+
+function textBlockHeight(value: string, fontSize: number): number {
+  const lineCount = value.split('\n').length;
+  return lineCount * fontSize + Math.max(0, lineCount - 1) * lineSpacing(fontSize);
 }
 
 export function buildFfmpegComposition(options: CompositionOptions): FfmpegComposition {
@@ -231,7 +290,7 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
     const alpha = spec.alpha ? `:alpha='${spec.alpha}'` : '';
     filters.push(
       `[${current}]drawtext=fontfile='${font}':textfile='${textPath}':reload=0:` +
-        `fontcolor=${spec.color}:fontsize=${spec.size}:line_spacing=${Math.max(4, Math.round(spec.size * 0.25))}:` +
+        `fontcolor=${spec.color}:fontsize=${spec.size}:line_spacing=${lineSpacing(spec.size)}:` +
         `x=${spec.x}:y=${spec.y}${alpha}:enable='between(n,${spec.start},${spec.end})'[${outputLabel}]`,
     );
     current = outputLabel;
@@ -248,7 +307,12 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
     features.deviceFrame = true;
   };
 
-  const addVisual = (scene: CompiledScene, assetId: string, rect: ContentRect): void => {
+  const addVisual = (
+    scene: CompiledScene,
+    assetId: string,
+    rect: ContentRect,
+    responsivePortraitFocus = false,
+  ): VisualFitTransform => {
     const asset = assets.get(assetId);
     if (!asset) throw new Error(`Scene ${scene.id} references missing asset ${assetId}.`);
     inputArgs.push(...assetInputArgs(asset, fps));
@@ -279,11 +343,20 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
     const alphaLabel = `alpha${labelIndex++}`;
     const shiftedLabel = `shifted${labelIndex++}`;
     const visualLabel = `visual${labelIndex++}`;
-    const fit = scene.fit ?? 'contain';
+    const requestedFit = scene.fit ?? 'contain';
+    const fit = responsivePortraitFocus && requestedFit === 'contain' ? 'cover' : requestedFit;
+    const sourceWidth = asset.width ?? compiled.canvas.width;
+    const sourceHeight = asset.height ?? compiled.canvas.height;
+    const focusPoints = [
+      ...(scene.cursor ? [scene.cursor.from, scene.cursor.to] : []),
+      ...(scene.callouts ?? []).map((callout) => callout.at),
+    ];
+    const focus = responsivePortraitFocus ? visualFocusPoint(focusPoints, sourceWidth, sourceHeight) : undefined;
+    const fitTransform = visualFitTransform(sourceWidth, sourceHeight, rect, fit, focus);
 
     filters.push(
       `[${inputIndex}:v]fps=${fps},trim=end_frame=${sceneDuration},setpts=N/(${fps}*TB),format=rgba,` +
-        `${fitFilters(rect, fit).join(',')},setsar=1[${sourceLabel}]`,
+        `${fitFilters(rect, fit, focus).join(',')},setsar=1[${sourceLabel}]`,
     );
     filters.push(
       `[${sourceLabel}]scale=w='max(2,trunc(${rect.width}*${scaleExpression}/2)*2)':` +
@@ -331,17 +404,23 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
     features.crop ||= fit === 'cover';
     features.transition ||= scene.transitionIn !== undefined && scene.transitionIn !== 'none';
     features.transition ||= scene.transitionOut !== undefined && scene.transitionOut !== 'none';
+    return fitTransform;
   };
 
   for (const scene of compiled.scenes) {
     const sceneStart = frameAtOutput(scene.startFrame, sourceFps, fps);
     const sceneEnd = Math.min(expectedFrames, frameAtOutput(scene.endFrame, sourceFps, fps));
     if (sceneStart >= expectedFrames || sceneEnd <= sceneStart) continue;
+    let sceneVisualTransform: VisualFitTransform | undefined;
 
     if (scene.kind === 'screen' && scene.assetId) {
-      const rect = screenRect(width, height);
+      const asset = assets.get(scene.assetId);
+      if (!asset) throw new Error(`Scene ${scene.id} references missing asset ${scene.assetId}.`);
+      const sourceAspectRatio = (asset.width ?? compiled.canvas.width) / (asset.height ?? compiled.canvas.height);
+      const responsivePortraitFocus = height > width && sourceAspectRatio > 1;
+      const rect = screenRect(width, height, sourceAspectRatio);
       drawDeviceFrame(rect, sceneStart, sceneEnd - 1);
-      addVisual(scene, scene.assetId, rect);
+      sceneVisualTransform = addVisual(scene, scene.assetId, rect, responsivePortraitFocus);
     } else if (scene.kind === 'comparison' && scene.assetId && scene.secondaryAssetId) {
       const rects = comparisonRects(width, height);
       drawDeviceFrame(rects[0], sceneStart, sceneEnd - 1);
@@ -349,66 +428,186 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
       addVisual(scene, scene.assetId, rects[0]);
       addVisual(scene, scene.secondaryAssetId, rects[1]);
     } else if (scene.assetId) {
-      addVisual(scene, scene.assetId, {x: 0, y: 0, width, height});
+      sceneVisualTransform = addVisual(scene, scene.assetId, {x: 0, y: 0, width, height});
     }
 
-    const headingSize = Math.max(24, Math.round(Math.min(width, height) * (scene.kind === 'title' ? 0.1 : 0.055)));
-    const bodySize = Math.max(18, Math.round(Math.min(width, height) * 0.04));
+    const sceneDuration = sceneEnd - sceneStart;
+    const sceneEasing: Easing = scene.easing ?? 'linear';
+    const localFrame = `(n-${sceneStart})`;
+    const overlayTransform = sceneVisualTransform ?? visualFitTransform(
+      compiled.canvas.width,
+      compiled.canvas.height,
+      {x: 0, y: 0, width, height},
+      'fill',
+    );
+    const fromScale = transformValue(scene.from, 'scale', 1);
+    const toScale = transformValue(scene.to, 'scale', 1);
+    const sceneScale = interpolateExpression(fromScale, toScale, localFrame, sceneDuration, sceneEasing);
+    const transitionScale = transitionScaleExpression(
+      scene.transitionIn,
+      scene.transitionOut,
+      localFrame,
+      sceneDuration,
+    );
+    const combinedScale = `(${sceneScale})*(${transitionScale})`;
+    const xFrom = transformValue(scene.from, 'x', 0) * (width / compiled.canvas.width);
+    const xTo = transformValue(scene.to, 'x', 0) * (width / compiled.canvas.width);
+    const yFrom = transformValue(scene.from, 'y', 0) * (height / compiled.canvas.height);
+    const yTo = transformValue(scene.to, 'y', 0) * (height / compiled.canvas.height);
+    const panX = interpolateExpression(xFrom, xTo, localFrame, sceneDuration, sceneEasing);
+    const panY = interpolateExpression(yFrom, yTo, localFrame, sceneDuration, sceneEasing);
+    const visualBaseX = slideExpression(
+      overlayTransform.rect.x,
+      width,
+      scene.transitionIn,
+      scene.transitionOut,
+      'n',
+      sceneStart,
+      sceneDuration,
+      'horizontal',
+    );
+    const visualBaseY = slideExpression(
+      overlayTransform.rect.y,
+      height,
+      scene.transitionIn,
+      scene.transitionOut,
+      'n',
+      sceneStart,
+      sceneDuration,
+      'vertical',
+    );
+    const mapOverlayPoint = (sourceX: string | number, sourceY: string | number): {x: string; y: string} => {
+      const localX = `${decimal(overlayTransform.offsetX)}+(${sourceX})*${decimal(overlayTransform.scaleX)}`;
+      const localY = `${decimal(overlayTransform.offsetY)}+(${sourceY})*${decimal(overlayTransform.scaleY)}`;
+      return {
+        x: `(${visualBaseX})+${decimal(overlayTransform.rect.width / 2)}+(${panX})+` +
+          `((${localX})-${decimal(overlayTransform.rect.width / 2)})*(${combinedScale})`,
+        y: `(${visualBaseY})+${decimal(overlayTransform.rect.height / 2)}+(${panY})+` +
+          `((${localY})-${decimal(overlayTransform.rect.height / 2)})*(${combinedScale})`,
+      };
+    };
+
+    const titleLayout = scene.kind === 'title' || scene.kind === 'outro'
+      ? titleTextLayout(width, height, scene.heading ?? '', scene.body)
+      : undefined;
+    const horizontalSafeMargin = Math.max(24, Math.round(width * 0.08));
+    const verticalSafeMargin = Math.max(24, Math.round(height * 0.04));
+    const textMaximumWidth = width - horizontalSafeMargin * 2;
+    const headingSize = titleLayout?.heading.fontSize ?? Math.max(
+      24,
+      Math.round(Math.min(height * 0.055, width * 0.055)),
+    );
+    const bodySize = titleLayout?.body?.fontSize ?? Math.max(
+      18,
+      Math.round(Math.min(height * 0.04, width * 0.045)),
+    );
+    const wrappedHeading = scene.heading
+      ? (titleLayout?.heading.text ?? wrapTextToWidth(scene.heading, headingSize, textMaximumWidth))
+      : undefined;
+    const centeredHeadingY = titleLayout?.headingY ?? Math.round(height * 0.045);
     if (scene.heading) {
       drawText({
         name: `${scene.id}-heading`,
-        text: wrapText(scene.heading, scene.kind === 'title' ? 32 : 52),
+        text: wrappedHeading!,
         color: foreground,
         size: headingSize,
         x: '(w-text_w)/2',
-        y: scene.kind === 'title' || scene.kind === 'outro' ? 'h*0.34' : 'h*0.045',
+        y: centeredHeadingY,
         start: sceneStart,
         end: sceneEnd - 1,
       });
     }
     if (scene.body) {
+      const captioned = scene.kind === 'screen' || scene.kind === 'comparison';
+      const captionWidth = Math.round(width * 0.84);
+      const bodyMaximumWidth = captioned ? captionWidth - horizontalSafeMargin : textMaximumWidth;
+      const wrappedBody = titleLayout?.body?.text ?? wrapTextToWidth(scene.body, bodySize, bodyMaximumWidth);
+      const bodyBlockHeight = textBlockHeight(wrappedBody, bodySize);
+      let bodyY = titleLayout?.bodyY ?? Math.round(height * 0.52);
       if (scene.kind === 'screen' || scene.kind === 'comparison') {
         const boxLabel = `captionBox${labelIndex++}`;
-        const captionHeight = Math.round(height * 0.13);
+        const captionPadding = Math.max(12, Math.round(bodySize * 0.6));
+        const captionHeight = Math.max(Math.round(height * 0.13), bodyBlockHeight + captionPadding * 2);
         const captionX = Math.round(width * 0.08);
-        const captionY = Math.round(height * 0.82);
-        const captionWidth = Math.round(width * 0.84);
+        const captionY = Math.min(
+          Math.round(height * 0.82),
+          height - verticalSafeMargin - captionHeight,
+        );
         filters.push(
           `[${current}]drawbox=x=${captionX}:y=${captionY}:w=${captionWidth}:h=${captionHeight}:color=black@0.72:t=fill:` +
             `enable='between(n,${sceneStart},${sceneEnd - 1})'[${boxLabel}]`,
         );
         current = boxLabel;
         features.caption = true;
+        bodyY = captionY + Math.round((captionHeight - bodyBlockHeight) / 2);
+      } else if (wrappedHeading && !titleLayout) {
+        const headingBottom = centeredHeadingY + textBlockHeight(wrappedHeading, headingSize);
+        bodyY = Math.max(bodyY, headingBottom + Math.max(24, Math.round(bodySize * 0.65)));
       }
       drawText({
         name: `${scene.id}-body`,
-        text: wrapText(scene.body, 58),
-        color: scene.kind === 'screen' || scene.kind === 'comparison' ? 'white' : foreground,
+        text: wrappedBody,
+        color: captioned ? 'white' : foreground,
         size: bodySize,
         x: '(w-text_w)/2',
-        y: scene.kind === 'screen' || scene.kind === 'comparison' ? 'h*0.845' : 'h*0.52',
+        y: bodyY,
         start: sceneStart,
         end: sceneEnd - 1,
       });
     }
 
     for (const callout of scene.callouts ?? []) {
-      const calloutStart = frameAtOutput(callout.startFrame, sourceFps, fps);
+      const outputLocalStart = frameAtOutput(callout.startFrame, sourceFps, fps);
+      const calloutStart = sceneStart + outputLocalStart;
       const calloutEnd = Math.min(
-        expectedFrames - 1,
-        frameAtOutput(callout.startFrame + callout.durationFrames, sourceFps, fps) - 1,
+        sceneEnd - 1,
+        sceneStart + frameAtOutput(callout.startFrame + callout.durationFrames, sourceFps, fps) - 1,
       );
-      const x = Math.round(callout.at.x * (width / compiled.canvas.width));
-      const y = Math.round(callout.at.y * (height / compiled.canvas.height));
+      const visualScale = interpolateFrame(fromScale, toScale, outputLocalStart, sceneDuration, sceneEasing) *
+        transitionScaleAtFrame(scene.transitionIn, scene.transitionOut, outputLocalStart, sceneDuration);
+      const mappedPosition = mapPointThroughVisual(callout.at, overlayTransform, visualScale, {
+        x: interpolateFrame(xFrom, xTo, outputLocalStart, sceneDuration, sceneEasing),
+        y: interpolateFrame(yFrom, yTo, outputLocalStart, sceneDuration, sceneEasing),
+      });
+      const requestedX = mappedPosition.x + slideOffsetAtFrame(
+        width,
+        scene.transitionIn,
+        scene.transitionOut,
+        outputLocalStart,
+        sceneDuration,
+        'horizontal',
+      );
+      const requestedY = mappedPosition.y + slideOffsetAtFrame(
+        height,
+        scene.transitionIn,
+        scene.transitionOut,
+        outputLocalStart,
+        sceneDuration,
+        'vertical',
+      );
       const calloutSize = Math.max(16, Math.round(Math.min(width, height) * 0.032));
-      const wrapped = wrapText(callout.text, 34);
-      const longestLine = Math.max(...wrapped.split('\n').map((line) => line.length));
-      const boxWidth = Math.min(Math.round(width * 0.48), Math.round(longestLine * calloutSize * 0.62 + 28));
-      const boxHeight = Math.round(wrapped.split('\n').length * calloutSize * 1.35 + 20);
+      const calloutPaddingX = 14;
+      const calloutPaddingY = 8;
+      const maximumBoxWidth = Math.round(width * 0.48);
+      const wrapped = wrapTextToWidth(
+        callout.text,
+        calloutSize,
+        maximumBoxWidth - calloutPaddingX * 2,
+      );
+      const longestLine = Math.max(...wrapped.split('\n').map((line) => Array.from(line).length));
+      const boxWidth = Math.min(
+        maximumBoxWidth,
+        Math.round(longestLine * calloutSize * 0.62 + calloutPaddingX * 2),
+      );
+      const boxHeight = textBlockHeight(wrapped, calloutSize) + calloutPaddingY * 2;
+      const calloutSafeMargin = Math.max(12, Math.round(Math.min(width, height) * 0.025));
+      const x = clamp(requestedX, calloutSafeMargin, width - calloutSafeMargin - boxWidth);
+      const y = clamp(requestedY, calloutSafeMargin, height - calloutSafeMargin - boxHeight);
       const calloutColor = callout.accent ? color(callout.accent, `callout ${callout.text}`) : accent;
       const boxLabel = `calloutBox${labelIndex++}`;
       filters.push(
-        `[${current}]drawbox=x=${x}:y=${y}:w=${boxWidth}:h=${boxHeight}:color=${calloutColor}@0.92:t=fill:` +
+        `[${current}]drawbox=x=${decimal(x)}:y=${decimal(y)}:w=${boxWidth}:h=${boxHeight}:` +
+          `color=${calloutColor}@0.92:t=fill:` +
           `enable='between(n,${calloutStart},${calloutEnd})'[${boxLabel}]`,
       );
       current = boxLabel;
@@ -417,8 +616,8 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
         text: wrapped,
         color: 'white',
         size: calloutSize,
-        x: x + 14,
-        y: y + 8,
+        x: decimal(x + calloutPaddingX),
+        y: decimal(y + calloutPaddingY),
         start: calloutStart,
         end: calloutEnd,
       });
@@ -441,23 +640,32 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
       const cursorSource = `cursorSource${labelIndex++}`;
       const cursorShifted = `cursorShifted${labelIndex++}`;
       const cursorOutput = `cursorOutput${labelIndex++}`;
-      const sceneDuration = sceneEnd - sceneStart;
-      const easing: Easing = scene.easing ?? 'linear';
-      const fromX = scene.cursor.from.x * (width / compiled.canvas.width);
-      const toX = scene.cursor.to.x * (width / compiled.canvas.width);
-      const fromY = scene.cursor.from.y * (height / compiled.canvas.height);
-      const toY = scene.cursor.to.y * (height / compiled.canvas.height);
-      const localFrame = `(n-${sceneStart})`;
-      const x = interpolateExpression(fromX, toX, localFrame, sceneDuration, easing);
-      const y = interpolateExpression(fromY, toY, localFrame, sceneDuration, easing);
+      const sourceX = interpolateExpression(
+        scene.cursor.from.x,
+        scene.cursor.to.x,
+        localFrame,
+        sceneDuration,
+        sceneEasing,
+      );
+      const sourceY = interpolateExpression(
+        scene.cursor.from.y,
+        scene.cursor.to.y,
+        localFrame,
+        sceneDuration,
+        sceneEasing,
+      );
+      const position = mapOverlayPoint(sourceX, sourceY);
       const cursorSize = Math.max(28, Math.round(Math.min(width, height) * 0.075));
+      const hotspotX = cursorSize * (CURSOR_RGBA_HOTSPOT.x / sourceCursorSize);
+      const hotspotY = cursorSize * (CURSOR_RGBA_HOTSPOT.y / sourceCursorSize);
       filters.push(
         `[${inputIndex}:v]loop=loop=-1:size=1:start=0,fps=${fps},trim=end_frame=${sceneDuration},` +
           `scale=${cursorSize}:${cursorSize},format=rgba[${cursorSource}]`,
       );
       filters.push(`[${cursorSource}]setpts=PTS+${sceneStart}/${fps}/TB[${cursorShifted}]`);
       filters.push(
-        `[${current}][${cursorShifted}]overlay=x='${x}':y='${y}':eof_action=pass:repeatlast=0:` +
+        `[${current}][${cursorShifted}]overlay=x='(${position.x})-${decimal(hotspotX)}':` +
+          `y='(${position.y})-${decimal(hotspotY)}':eof_action=pass:repeatlast=0:` +
           `enable='between(n,${sceneStart},${sceneEnd - 1})'[${cursorOutput}]`,
       );
       current = cursorOutput;
@@ -465,11 +673,47 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
       features.cursor = true;
 
       for (const clickFrame of scene.cursor.clickFrames ?? []) {
-        const click = frameAtOutput(clickFrame, sourceFps, fps);
-        const sourceLocalClick = clickFrame - scene.startFrame;
-        const clickX = interpolateFrame(fromX, toX, sourceLocalClick, scene.durationFrames, easing);
-        const clickY = interpolateFrame(fromY, toY, sourceLocalClick, scene.durationFrames, easing);
-        const rippleEnd = Math.min(expectedFrames - 1, click + Math.max(5, Math.round(fps * 0.42)));
+        const outputLocalClick = frameAtOutput(clickFrame, sourceFps, fps);
+        const click = sceneStart + outputLocalClick;
+        const sourcePoint = {
+          x: interpolateFrame(
+            scene.cursor.from.x,
+            scene.cursor.to.x,
+            outputLocalClick,
+            sceneDuration,
+            sceneEasing,
+          ),
+          y: interpolateFrame(
+            scene.cursor.from.y,
+            scene.cursor.to.y,
+            outputLocalClick,
+            sceneDuration,
+            sceneEasing,
+          ),
+        };
+        const visualScale = interpolateFrame(fromScale, toScale, outputLocalClick, sceneDuration, sceneEasing) *
+          transitionScaleAtFrame(scene.transitionIn, scene.transitionOut, outputLocalClick, sceneDuration);
+        const mappedClick = mapPointThroughVisual(sourcePoint, overlayTransform, visualScale, {
+          x: interpolateFrame(xFrom, xTo, outputLocalClick, sceneDuration, sceneEasing),
+          y: interpolateFrame(yFrom, yTo, outputLocalClick, sceneDuration, sceneEasing),
+        });
+        const clickX = mappedClick.x + slideOffsetAtFrame(
+          width,
+          scene.transitionIn,
+          scene.transitionOut,
+          outputLocalClick,
+          sceneDuration,
+          'horizontal',
+        );
+        const clickY = mappedClick.y + slideOffsetAtFrame(
+          height,
+          scene.transitionIn,
+          scene.transitionOut,
+          outputLocalClick,
+          sceneDuration,
+          'vertical',
+        );
+        const rippleEnd = Math.min(sceneEnd - 1, click + Math.max(5, Math.round(fps * 0.42)));
         const rippleLabel = `ripple${labelIndex++}`;
         const rippleText = addTextFile('click-ripple', 'O');
         filters.push(
