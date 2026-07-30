@@ -9,6 +9,7 @@ import {validateDemoFile} from './validate.js';
 export interface CompileResult {
   compiled: CompiledDemoV1;
   json: string;
+  packageAssets: Array<{relativePath: string; buffer: Buffer}>;
 }
 
 export function compileDemoFile(file: string): CompileResult {
@@ -56,7 +57,10 @@ export function compileDemoFile(file: string): CompileResult {
   };
   const schema = validateCompiledSchema(compiled);
   if (!schema.valid) throw new DemoValidationError(schema.issues, 'Compiled demo failed its output schema.');
-  return {compiled, json: `${canonicalJson(compiled, 2)}\n`};
+  const packageAssets = validated.assets
+    .map(({relativePath, buffer}) => ({relativePath, buffer: Buffer.from(buffer)}))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  return {compiled, json: `${canonicalJson(compiled, 2)}\n`, packageAssets};
 }
 
 export function writeCompiledDemo(result: CompileResult, outputDirectory: string): string[] {
@@ -64,6 +68,9 @@ export function writeCompiledDemo(result: CompileResult, outputDirectory: string
   if (path.parse(targetDirectory).root === targetDirectory) throw new Error('Refusing to use a filesystem root as the compile output directory.');
   fs.mkdirSync(targetDirectory, {recursive: true});
   const written = [writeIdempotent(path.join(targetDirectory, 'compiled-demo-v1.json'), result.json)];
+  for (const asset of result.packageAssets) {
+    written.push(writeIdempotent(path.join(targetDirectory, ...asset.relativePath.split('/')), asset.buffer));
+  }
   for (const request of result.compiled.hiapiRequests) {
     written.push(writeIdempotent(path.join(targetDirectory, `hiapi-request-${request.id}.json`), `${canonicalJson(request, 2)}\n`));
   }
@@ -84,15 +91,17 @@ function normalizeScene(scene: SceneSpec): CompiledScene {
   };
 }
 
-function writeIdempotent(file: string, content: string): string {
+function writeIdempotent(file: string, content: string | Buffer): string {
+  const bytes = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
   if (fs.existsSync(file)) {
-    const existing = fs.readFileSync(file, 'utf8');
-    if (existing === content) return file;
+    const existing = fs.readFileSync(file);
+    if (existing.equals(bytes)) return file;
     throw new Error(`Refusing to replace a different compiled artifact: ${file}`);
   }
+  fs.mkdirSync(path.dirname(file), {recursive: true});
   const temporary = `${file}.tmp-${process.pid}`;
   try {
-    fs.writeFileSync(temporary, content, {encoding: 'utf8', flag: 'wx'});
+    fs.writeFileSync(temporary, bytes, {flag: 'wx'});
     fs.renameSync(temporary, file);
   } finally {
     fs.rmSync(temporary, {force: true});
