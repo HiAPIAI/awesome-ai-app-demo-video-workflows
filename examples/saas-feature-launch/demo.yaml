@@ -36,14 +36,14 @@ assets:
     license: MIT
   - id: ui-click
     type: audio
-    path: assets/audio/sfx/sfx_001.mp3
-    alt: Bundled crisp UI click
-    license: Pixabay Content License
+    path: assets/audio/sfx/sfx_001.wav
+    alt: Original deterministic crisp UI click
+    license: MIT
   - id: result-chime
     type: audio
-    path: assets/audio/sfx/sfx_002.mp3
-    alt: Bundled soft result confirmation chime
-    license: Pixabay Content License
+    path: assets/audio/sfx/sfx_002.wav
+    alt: Original deterministic soft result confirmation chime
+    license: MIT
 scenes:
   - id: feature-title
     kind: title

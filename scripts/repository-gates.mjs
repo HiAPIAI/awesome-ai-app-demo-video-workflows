@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {access, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {Ajv2020} from 'ajv/dist/2020.js';
@@ -174,10 +175,20 @@ for (const entry of catalog.workflows) {
     const audioAssets = new Map(demo.assets.filter(({type}) => type === 'audio').map((asset) => [asset.id, asset]));
     assert.equal(audioAssets.get('background-music')?.path, 'assets/audio/bgm/bgm_003.wav');
     assert.equal(audioAssets.get('background-music')?.license, 'MIT');
-    assert.equal(audioAssets.get('ui-click')?.path, 'assets/audio/sfx/sfx_001.mp3');
-    assert.equal(audioAssets.get('ui-click')?.license, 'Pixabay Content License');
-    assert.equal(audioAssets.get('result-chime')?.path, 'assets/audio/sfx/sfx_002.mp3');
-    assert.equal(audioAssets.get('result-chime')?.license, 'Pixabay Content License');
+    assert.equal(audioAssets.get('ui-click')?.path, 'assets/audio/sfx/sfx_001.wav');
+    assert.equal(audioAssets.get('ui-click')?.license, 'MIT');
+    assert.equal(audioAssets.get('result-chime')?.path, 'assets/audio/sfx/sfx_002.wav');
+    assert.equal(audioAssets.get('result-chime')?.license, 'MIT');
+    await access(path.join(exampleRoot, 'assets/audio/generate.mjs'));
+    const lockedAudioHashes = new Map([
+      ['assets/audio/bgm/bgm_003.wav', '35566352a71b74f082409aa5c175651620779715ec988f6adcb14e0bda1e8a9e'],
+      ['assets/audio/sfx/sfx_001.wav', 'c6ed2607be9069a6b34bc2e4c7efec4fc4902da7b71301ce3bb3a983749329e8'],
+      ['assets/audio/sfx/sfx_002.wav', 'd0ab469c31956b498dedb9a5359306ba834b9d61d71c20b554abbe5f6a27c379'],
+    ]);
+    for (const [assetPath, expectedHash] of lockedAudioHashes) {
+      const bytes = await readFile(path.join(exampleRoot, assetPath));
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), expectedHash, `${assetPath} hash changed`);
+    }
     assert.equal(JSON.stringify(demo).includes('bgm_001'), false, 'rejected bgm_001 must not be referenced');
     assert.equal(JSON.stringify(demo).includes('bgm_002'), false, 'rejected bgm_002 must not be referenced');
     assert.deepEqual(demo.audio, [
