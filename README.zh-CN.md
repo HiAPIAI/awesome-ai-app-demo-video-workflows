@@ -4,7 +4,7 @@
 
 一组开放、可复现的工作流，用应用截图或导出的 UI 原型状态制作产品演示视频。关键产品界面始终由本地确定性图层渲染；可选的 HiAPI 生成能力只用于背景、片头、转场和片尾等非关键图层。
 
-[English](README.md) · [安装与环境](docs/setup.md) · [创作指南](docs/authoring.md) · [Schema 参考](docs/schema-reference.md) · [HiAPI 安全说明](docs/hiapi-safety.md)
+[English](README.md) · [安装与环境](docs/setup.md) · [创作指南](docs/authoring.md) · [Schema 参考](docs/schema-reference.md) · [渲染验收矩阵](docs/acceptance-matrix.md) · [HiAPI 安全说明](docs/hiapi-safety.md)
 
 > 集成状态：`demo-v1`、`compiled-demo-v1` 契约和 CLI 名称已经冻结。核心与渲染分支完成集成、且每个完整视频通过人工审核前，下列示例均保持 `spec-only`，不代表已经验证渲染结果。
 

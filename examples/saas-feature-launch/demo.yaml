@@ -29,6 +29,21 @@ assets:
     path: assets/launch-results.svg
     alt: Northstar automation performance results
     license: MIT
+  - id: background-music
+    type: audio
+    path: assets/audio/bgm/bgm_003.wav
+    alt: Original deterministic Northstar music bed
+    license: MIT
+  - id: ui-click
+    type: audio
+    path: assets/audio/sfx/sfx_001.mp3
+    alt: Bundled crisp UI click
+    license: Pixabay Content License
+  - id: result-chime
+    type: audio
+    path: assets/audio/sfx/sfx_002.mp3
+    alt: Bundled soft result confirmation chime
+    license: Pixabay Content License
 scenes:
   - id: feature-title
     kind: title
@@ -102,6 +117,25 @@ scenes:
     heading: Ship the journey, not the busywork
     body: Northstar Automations
     transitionIn: fade
+audio:
+  - id: music-bed
+    assetId: background-music
+    startFrame: 0
+    volume: 0.65
+    fadeInFrames: 12
+    fadeOutFrames: 24
+  - id: dashboard-click
+    assetId: ui-click
+    startFrame: 107
+    volume: 1
+  - id: builder-click
+    assetId: ui-click
+    startFrame: 219
+    volume: 1
+  - id: result-confirmation
+    assetId: result-chime
+    startFrame: 255
+    volume: 1
 outputs:
   - id: landscape
     width: 1920

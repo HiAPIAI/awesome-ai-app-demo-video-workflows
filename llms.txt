@@ -9,6 +9,7 @@ Workflow catalog: data/workflows.json
 Setup: docs/setup.md
 Authoring: docs/authoring.md
 Source schema guide: docs/schema-reference.md
+Render acceptance matrix: docs/acceptance-matrix.md
 HiAPI safety: docs/hiapi-safety.md
 Launch assets: docs/launch-kit.md
 Source contract: schemas/demo-v1.schema.json
