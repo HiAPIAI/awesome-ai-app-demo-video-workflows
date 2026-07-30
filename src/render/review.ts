@@ -15,7 +15,6 @@ export interface ReviewArtifacts {
     last: string;
   };
 }
-
 function portable(path: string): string {
   return path.replaceAll('\\', '/');
 }
@@ -93,4 +92,3 @@ export async function createReviewArtifacts(
     },
   };
 }
-

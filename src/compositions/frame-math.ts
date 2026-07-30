@@ -5,7 +5,6 @@ export const TRANSITION_FRAMES = 8;
 export function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
-
 export function easeAt(progress: number, easing: Easing): number {
   const p = clamp(progress, 0, 1);
   switch (easing) {
@@ -89,4 +88,3 @@ export function transitionScaleExpression(
   }
   return factors.length === 0 ? '1' : factors.join('*');
 }
-
