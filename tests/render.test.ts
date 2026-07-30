@@ -60,6 +60,97 @@ test('render CLI keeps the frozen argument names', () => {
   assert.throws(() => parseRenderArguments(['--input', 'compiled.json']), /Unknown or incomplete/);
 });
 
+test('keeps long headings, body copy, and callouts inside landscape and portrait safe areas', () => {
+  const compiled: CompiledDemoV1 = {
+    schemaVersion: 'compiled-demo-v1',
+    source: {schemaVersion: 'demo-v1', path: 'demo.yaml', sha256: '0'.repeat(64)},
+    project: {id: 'responsive-text', title: 'Responsive text'},
+    canvas: {width: 1920, height: 1080, fps: 30, durationFrames: 90, durationSeconds: 3},
+    brand: {
+      background: '#F3F5F7',
+      foreground: '#171A1F',
+      accent: '#2D8CFF',
+      fontFamily: 'Arial',
+    },
+    assets: [],
+    scenes: [
+      {
+        id: 'responsive-title',
+        kind: 'title',
+        startFrame: 0,
+        endFrame: 90,
+        durationFrames: 90,
+        heading: 'Automations, without the busywork across every product release',
+        body: 'Build, test, and ship a customer journey from one deterministic canvas.',
+        callouts: [
+          {
+            text: 'Priority and owner now share one scan line',
+            at: {x: 1910, y: 1070},
+            startFrame: 0,
+            durationFrames: 30,
+          },
+        ],
+      },
+    ],
+    audio: [],
+    outputs: [
+      {id: 'landscape', width: 1920, height: 1080, fps: 30, fileName: 'landscape.mp4'},
+      {id: 'portrait', width: 1080, height: 1920, fps: 30, fileName: 'portrait.mp4'},
+    ],
+    hiapiRequests: [],
+  };
+
+  for (const output of compiled.outputs) {
+    const composition = buildFfmpegComposition({
+      compiled,
+      output,
+      assets: new Map(),
+      textDirectory: join('layout', output.id),
+      cursorPath: 'cursor.rgba',
+      cursorSize: 64,
+      fontPath: 'font.ttf',
+    });
+    const headingText = composition.textFiles.find((file) => file.path.includes('responsive-title-heading'));
+    const headingFilter = composition.filterGraph
+      .split(';\n')
+      .find((filter) => filter.includes('responsive-title-heading'));
+    const bodyFilter = composition.filterGraph
+      .split(';\n')
+      .find((filter) => filter.includes('responsive-title-body'));
+    const calloutBox = composition.filterGraph
+      .split(';\n')
+      .find((filter) => filter.includes('[calloutBox'));
+    assert.ok(headingText);
+    assert.ok(headingFilter);
+    assert.ok(bodyFilter);
+    assert.ok(calloutBox);
+
+    const headingMatch = headingFilter.match(/fontsize=(\d+):line_spacing=(\d+):x=.*:y=(\d+)/u);
+    const bodyMatch = bodyFilter.match(/fontsize=(\d+):line_spacing=(\d+):x=.*:y=(\d+)/u);
+    const boxMatch = calloutBox.match(/drawbox=x=(\d+):y=(\d+):w=(\d+):h=(\d+):color/u);
+    assert.ok(headingMatch);
+    assert.ok(bodyMatch);
+    assert.ok(boxMatch);
+
+    const headingLines = headingText.contents.split('\n');
+    const headingSize = Number(headingMatch[1]);
+    const headingSpacing = Number(headingMatch[2]);
+    const headingY = Number(headingMatch[3]);
+    const bodySize = Number(bodyMatch[1]);
+    const bodyY = Number(bodyMatch[3]);
+    const headingHeight = headingLines.length * headingSize + (headingLines.length - 1) * headingSpacing;
+    assert.ok(headingLines.length >= (output.id === 'portrait' ? 4 : 3));
+    assert.ok(bodyY >= headingY + headingHeight + Math.max(24, Math.round(bodySize * 0.65)));
+
+    const [boxX, boxY, boxWidth, boxHeight] = boxMatch.slice(1).map(Number) as [number, number, number, number];
+    const safeMargin = Math.max(12, Math.round(Math.min(output.width, output.height) * 0.025));
+    assert.ok(boxX >= safeMargin);
+    assert.ok(boxY >= safeMargin);
+    assert.ok(boxX + boxWidth <= output.width - safeMargin);
+    assert.ok(boxY + boxHeight <= output.height - safeMargin);
+  }
+});
+
 test('renders repeatable landscape and portrait H.264/AAC outputs with review artifacts', async () => {
   const fixtureDirectory = await mkdtemp(join(tmpdir(), 'app-demo-render-fixture-'));
   try {
