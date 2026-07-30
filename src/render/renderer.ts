@@ -6,6 +6,7 @@ import type {OutputSpec} from '../contracts/types.js';
 import {resolveAndVerifyAssets} from '../media/assets.js';
 import {resolveRenderFont} from '../media/font.js';
 import {createCursorRgba, CURSOR_RGBA_SIZE} from '../media/generated.js';
+import {rasterizeSvgAssets} from '../media/rasterize.js';
 import {loadCompiledDemo} from './compiled.js';
 import {probeAndValidate} from './probe.js';
 import {runProcess} from './process.js';
@@ -104,7 +105,8 @@ export async function renderProject(options: RenderProjectOptions): Promise<Rend
       toolVersion('ffmpeg'),
       toolVersion('ffprobe'),
     ]);
-    const assets = await resolveAndVerifyAssets(loaded.compiled, loaded.path, workingDirectory);
+    const verifiedAssets = await resolveAndVerifyAssets(loaded.compiled, loaded.path, workingDirectory);
+    const assets = await rasterizeSvgAssets(verifiedAssets, join(workDirectory, 'rasterized-assets'));
     const cursorPath = join(workDirectory, 'cursor.rgba');
     await writeFile(cursorPath, createCursorRgba());
     const renderedOutputs: RenderedOutputReport[] = [];

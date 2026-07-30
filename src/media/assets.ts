@@ -1,10 +1,11 @@
 import {createHash} from 'node:crypto';
 import {access, readFile, stat} from 'node:fs/promises';
-import {isAbsolute, dirname, relative, resolve} from 'node:path';
+import {isAbsolute, dirname, extname, relative, resolve} from 'node:path';
 import type {CompiledAsset, CompiledDemoV1} from '../contracts/types.js';
 
 export interface ResolvedAsset extends CompiledAsset {
   absolutePath: string;
+  verifiedSvg?: Buffer;
 }
 function isInside(root: string, target: string): boolean {
   const pathFromRoot = relative(root, target);
@@ -66,7 +67,10 @@ export async function resolveAndVerifyAssets(
     if (sha256 !== asset.sha256) {
       throw new Error(`Asset ${asset.id} SHA-256 differs from the compiled manifest.`);
     }
-    resolvedAssets.set(asset.id, {...asset, absolutePath});
+    const verifiedSvg = asset.type === 'image' && extname(asset.path).toLowerCase() === '.svg'
+      ? {verifiedSvg: contents}
+      : {};
+    resolvedAssets.set(asset.id, {...asset, absolutePath, ...verifiedSvg});
   }
 
   return resolvedAssets;
