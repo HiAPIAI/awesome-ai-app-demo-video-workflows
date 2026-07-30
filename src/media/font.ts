@@ -19,4 +19,3 @@ export async function resolveRenderFont(): Promise<string> {
   }
   throw new Error('No supported local render font was found. Install Arial, Segoe UI, or DejaVu Sans.');
 }
-

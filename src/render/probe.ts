@@ -12,7 +12,6 @@ interface ProbeStream {
   duration?: string;
   nb_read_frames?: string;
 }
-
 interface ProbeDocument {
   streams?: ProbeStream[];
   format?: {duration?: string};
@@ -92,4 +91,3 @@ export async function probeAndValidate(
     ...(expectAudio ? {audioCodec: 'aac' as const} : {}),
   };
 }
-
