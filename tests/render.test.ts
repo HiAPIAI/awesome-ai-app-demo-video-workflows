@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawn} from 'node:child_process';
-import {access, mkdtemp, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {access, mkdtemp, readdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
+import {buildFfmpegComposition} from '../src/compositions/ffmpeg-composition.js';
 import {interpolateFrame} from '../src/compositions/frame-math.js';
 import type {CompiledDemoV1} from '../src/contracts/types.js';
 import {parseRenderArguments} from '../src/cli/render.js';
+import {resolveAndVerifyAssets} from '../src/media/assets.js';
+import {rasterizeSvgAssets} from '../src/media/rasterize.js';
 import {renderProject} from '../src/render/renderer.js';
 
 async function command(executable: string, args: readonly string[]): Promise<void> {
@@ -31,6 +34,17 @@ async function assetRecord(path: string): Promise<{sha256: string; bytes: number
   return {sha256: createHash('sha256').update(contents).digest('hex'), bytes: metadata.size};
 }
 
+async function renderWorkDirectories(path: string): Promise<string[]> {
+  try {
+    return (await readdir(path, {withFileTypes: true}))
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('.render-work-'))
+      .map((entry) => entry.name);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
 test('frame interpolation is deterministic and bounded by frame progress', () => {
   assert.equal(interpolateFrame(0, 100, 0, 11, 'linear'), 0);
   assert.equal(interpolateFrame(0, 100, 5, 11, 'linear'), 50);
@@ -50,25 +64,11 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
   const fixtureDirectory = await mkdtemp(join(tmpdir(), 'app-demo-render-fixture-'));
   try {
     const firstImage = join(fixtureDirectory, 'screen-a.svg');
-    const secondImage = join(fixtureDirectory, 'screen-b.png');
+    const secondImage = join(fixtureDirectory, 'screen-b.svg');
     const audioPath = join(fixtureDirectory, 'tone.wav');
-    const sourceSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="640" height="360" fill="#1769aa"/><circle cx="320" cy="180" r="96" fill="#f6c445"/></svg>';
-    await writeFile(firstImage, sourceSvg, 'utf8');
-    await command('ffmpeg', [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      'smptebars=size=640x360:rate=24',
-      '-frames:v',
-      '1',
-      '-threads',
-      '1',
-      secondImage,
-    ]);
+    const landscapeSvg = await readFile(new URL('./fixtures/render/landscape-ui.svg', import.meta.url));
+    const portraitSvg = await readFile(new URL('./fixtures/render/portrait-ui.svg', import.meta.url));
+    await Promise.all([writeFile(firstImage, landscapeSvg), writeFile(secondImage, portraitSvg)]);
     await command('ffmpeg', [
       '-hide_banner',
       '-loglevel',
@@ -100,7 +100,7 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
       },
       assets: [
         {id: 'screen-a', type: 'image', path: 'screen-a.svg', width: 640, height: 360, ...firstRecord},
-        {id: 'screen-b', type: 'image', path: 'screen-b.png', width: 640, height: 360, ...secondRecord},
+        {id: 'screen-b', type: 'image', path: 'screen-b.svg', width: 360, height: 640, ...secondRecord},
         {id: 'tone', type: 'audio', path: 'tone.wav', durationSeconds: 1, ...audioRecord},
       ],
       scenes: [
@@ -163,6 +163,41 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
     };
     const compiledPath = join(fixtureDirectory, 'compiled.json');
     await writeFile(compiledPath, `${JSON.stringify(compiled, null, 2)}\n`, 'utf8');
+    const compiledBeforeRender = await readFile(compiledPath, 'utf8');
+
+    const verifiedAssets = await resolveAndVerifyAssets(compiled, compiledPath, fixtureDirectory);
+    assert.deepEqual(
+      [...verifiedAssets.values()].filter((asset) => asset.verifiedSvg).map((asset) => asset.path),
+      ['screen-a.svg', 'screen-b.svg'],
+    );
+    await writeFile(firstImage, 'the verified SVG source changed before rasterization', 'utf8');
+    const preparedDirectory = join(fixtureDirectory, 'prepared-assets');
+    const preparedAssets = await rasterizeSvgAssets(verifiedAssets, preparedDirectory);
+    await writeFile(firstImage, landscapeSvg);
+    for (const id of ['screen-a', 'screen-b']) {
+      const original = compiled.assets.find((asset) => asset.id === id);
+      const prepared = preparedAssets.get(id);
+      assert.ok(original);
+      assert.ok(prepared);
+      assert.match(prepared.absolutePath, /\.png$/u);
+      assert.equal(prepared.path, original.path);
+      assert.equal(prepared.sha256, original.sha256);
+      assert.equal(prepared.bytes, original.bytes);
+    }
+    const composition = buildFfmpegComposition({
+      compiled,
+      output: compiled.outputs[0]!,
+      assets: preparedAssets,
+      textDirectory: join(fixtureDirectory, 'composition-text'),
+      cursorPath: join(fixtureDirectory, 'cursor.rgba'),
+      cursorSize: 64,
+      fontPath: join(fixtureDirectory, 'font.ttf'),
+    });
+    const pngInputs = composition.inputArgs.filter((argument) => argument.endsWith('.png'));
+    assert.equal(composition.inputArgs.some((argument) => argument.endsWith('.svg')), false);
+    assert.equal(pngInputs.length, 3);
+    assert.equal(pngInputs.every((argument) => argument.startsWith(preparedDirectory)), true);
+
     const firstOutput = join(fixtureDirectory, 'render-one');
     const secondOutput = join(fixtureDirectory, 'render-two');
     const firstReport = await renderProject({
@@ -205,16 +240,27 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
     const checklist = await readFile(join(firstOutput, 'review-checklist.md'), 'utf8');
     assert.match(checklist, /No generative pass redrew UI or text/);
     await access(join(firstOutput, 'render-report.json'));
+    assert.deepEqual(await renderWorkDirectories(firstOutput), []);
+    assert.deepEqual(await renderWorkDirectories(secondOutput), []);
+    assert.equal(await readFile(compiledPath, 'utf8'), compiledBeforeRender);
+    assert.deepEqual(
+      JSON.parse(await readFile(compiledPath, 'utf8')).assets.map((asset: {path: string}) => asset.path),
+      ['screen-a.svg', 'screen-b.svg', 'tone.wav'],
+    );
 
-    await writeFile(firstImage, sourceSvg.replace('#1769aa', '#aa1769'), 'utf8');
+    const tamperedSvg = landscapeSvg.toString('utf8').replace('#f4f6f8', '#f5f6f8');
+    assert.equal(Buffer.byteLength(tamperedSvg), landscapeSvg.length);
+    await writeFile(firstImage, tamperedSvg, 'utf8');
+    const tamperedOutput = join(fixtureDirectory, 'render-tampered');
     await assert.rejects(
       renderProject({
         compiledPath,
-        outputDirectory: join(fixtureDirectory, 'render-tampered'),
+        outputDirectory: tamperedOutput,
         workingDirectory: fixtureDirectory,
       }),
       /SHA-256 differs/,
     );
+    assert.deepEqual(await renderWorkDirectories(tamperedOutput), []);
   } finally {
     await rm(fixtureDirectory, {recursive: true, force: true});
   }
