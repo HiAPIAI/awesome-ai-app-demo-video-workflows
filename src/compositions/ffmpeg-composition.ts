@@ -156,13 +156,23 @@ function slideExpression(
 
 function wrapText(value: string, maximumCharacters: number): string {
   const words = value.trim().split(/\s+/u);
-  if (words.length === 1 && (words[0]?.length ?? 0) > maximumCharacters) {
-    return value.match(new RegExp(`.{1,${maximumCharacters}}`, 'gu'))?.join('\n') ?? value;
-  }
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
-    if (line.length > 0 && line.length + word.length + 1 > maximumCharacters) {
+    const characters = Array.from(word);
+    if (characters.length > maximumCharacters) {
+      if (line.length > 0) {
+        lines.push(line);
+        line = '';
+      }
+      while (characters.length > maximumCharacters) {
+        lines.push(characters.splice(0, maximumCharacters).join(''));
+      }
+      line = characters.join('');
+    } else if (
+      line.length > 0 &&
+      Array.from(line).length + characters.length + 1 > maximumCharacters
+    ) {
       lines.push(line);
       line = word;
     } else {
@@ -171,6 +181,24 @@ function wrapText(value: string, maximumCharacters: number): string {
   }
   if (line.length > 0) lines.push(line);
   return lines.join('\n');
+}
+
+function lineSpacing(fontSize: number): number {
+  return Math.max(4, Math.round(fontSize * 0.25));
+}
+
+function wrapTextToWidth(value: string, fontSize: number, maximumWidth: number): string {
+  const averageGlyphWidth = fontSize * 0.62;
+  return wrapText(value, Math.max(1, Math.floor(maximumWidth / averageGlyphWidth)));
+}
+
+function textBlockHeight(value: string, fontSize: number): number {
+  const lineCount = value.split('\n').length;
+  return lineCount * fontSize + Math.max(0, lineCount - 1) * lineSpacing(fontSize);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
 }
 
 export function buildFfmpegComposition(options: CompositionOptions): FfmpegComposition {
@@ -231,7 +259,7 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
     const alpha = spec.alpha ? `:alpha='${spec.alpha}'` : '';
     filters.push(
       `[${current}]drawtext=fontfile='${font}':textfile='${textPath}':reload=0:` +
-        `fontcolor=${spec.color}:fontsize=${spec.size}:line_spacing=${Math.max(4, Math.round(spec.size * 0.25))}:` +
+        `fontcolor=${spec.color}:fontsize=${spec.size}:line_spacing=${lineSpacing(spec.size)}:` +
         `x=${spec.x}:y=${spec.y}${alpha}:enable='between(n,${spec.start},${spec.end})'[${outputLabel}]`,
     );
     current = outputLabel;
@@ -352,41 +380,70 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
       addVisual(scene, scene.assetId, {x: 0, y: 0, width, height});
     }
 
-    const headingSize = Math.max(24, Math.round(Math.min(width, height) * (scene.kind === 'title' ? 0.1 : 0.055)));
-    const bodySize = Math.max(18, Math.round(Math.min(width, height) * 0.04));
+    const horizontalSafeMargin = Math.max(24, Math.round(width * 0.08));
+    const verticalSafeMargin = Math.max(24, Math.round(height * 0.04));
+    const textMaximumWidth = width - horizontalSafeMargin * 2;
+    const headingSize = Math.max(
+      24,
+      Math.round(
+        scene.kind === 'title'
+          ? Math.min(height * 0.1, width * 0.09)
+          : Math.min(height * 0.055, width * 0.055),
+      ),
+    );
+    const bodySize = Math.max(18, Math.round(Math.min(height * 0.04, width * 0.045)));
+    const wrappedHeading = scene.heading
+      ? wrapTextToWidth(scene.heading, headingSize, textMaximumWidth)
+      : undefined;
+    const centeredHeadingY = Math.round(
+      height * (scene.kind === 'title' ? 0.27 : scene.kind === 'outro' ? 0.34 : 0.045),
+    );
     if (scene.heading) {
       drawText({
         name: `${scene.id}-heading`,
-        text: wrapText(scene.heading, scene.kind === 'title' ? 32 : 52),
+        text: wrappedHeading!,
         color: foreground,
         size: headingSize,
         x: '(w-text_w)/2',
-        y: scene.kind === 'title' || scene.kind === 'outro' ? 'h*0.34' : 'h*0.045',
+        y: centeredHeadingY,
         start: sceneStart,
         end: sceneEnd - 1,
       });
     }
     if (scene.body) {
+      const captioned = scene.kind === 'screen' || scene.kind === 'comparison';
+      const captionWidth = Math.round(width * 0.84);
+      const bodyMaximumWidth = captioned ? captionWidth - horizontalSafeMargin : textMaximumWidth;
+      const wrappedBody = wrapTextToWidth(scene.body, bodySize, bodyMaximumWidth);
+      const bodyBlockHeight = textBlockHeight(wrappedBody, bodySize);
+      let bodyY = Math.round(height * 0.52);
       if (scene.kind === 'screen' || scene.kind === 'comparison') {
         const boxLabel = `captionBox${labelIndex++}`;
-        const captionHeight = Math.round(height * 0.13);
+        const captionPadding = Math.max(12, Math.round(bodySize * 0.6));
+        const captionHeight = Math.max(Math.round(height * 0.13), bodyBlockHeight + captionPadding * 2);
         const captionX = Math.round(width * 0.08);
-        const captionY = Math.round(height * 0.82);
-        const captionWidth = Math.round(width * 0.84);
+        const captionY = Math.min(
+          Math.round(height * 0.82),
+          height - verticalSafeMargin - captionHeight,
+        );
         filters.push(
           `[${current}]drawbox=x=${captionX}:y=${captionY}:w=${captionWidth}:h=${captionHeight}:color=black@0.72:t=fill:` +
             `enable='between(n,${sceneStart},${sceneEnd - 1})'[${boxLabel}]`,
         );
         current = boxLabel;
         features.caption = true;
+        bodyY = captionY + Math.round((captionHeight - bodyBlockHeight) / 2);
+      } else if (wrappedHeading) {
+        const headingBottom = centeredHeadingY + textBlockHeight(wrappedHeading, headingSize);
+        bodyY = Math.max(bodyY, headingBottom + Math.max(24, Math.round(bodySize * 0.65)));
       }
       drawText({
         name: `${scene.id}-body`,
-        text: wrapText(scene.body, 58),
-        color: scene.kind === 'screen' || scene.kind === 'comparison' ? 'white' : foreground,
+        text: wrappedBody,
+        color: captioned ? 'white' : foreground,
         size: bodySize,
         x: '(w-text_w)/2',
-        y: scene.kind === 'screen' || scene.kind === 'comparison' ? 'h*0.845' : 'h*0.52',
+        y: bodyY,
         start: sceneStart,
         end: sceneEnd - 1,
       });
@@ -398,13 +455,26 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
         expectedFrames - 1,
         frameAtOutput(callout.startFrame + callout.durationFrames, sourceFps, fps) - 1,
       );
-      const x = Math.round(callout.at.x * (width / compiled.canvas.width));
-      const y = Math.round(callout.at.y * (height / compiled.canvas.height));
+      const requestedX = Math.round(callout.at.x * (width / compiled.canvas.width));
+      const requestedY = Math.round(callout.at.y * (height / compiled.canvas.height));
       const calloutSize = Math.max(16, Math.round(Math.min(width, height) * 0.032));
-      const wrapped = wrapText(callout.text, 34);
-      const longestLine = Math.max(...wrapped.split('\n').map((line) => line.length));
-      const boxWidth = Math.min(Math.round(width * 0.48), Math.round(longestLine * calloutSize * 0.62 + 28));
-      const boxHeight = Math.round(wrapped.split('\n').length * calloutSize * 1.35 + 20);
+      const calloutPaddingX = 14;
+      const calloutPaddingY = 8;
+      const maximumBoxWidth = Math.round(width * 0.48);
+      const wrapped = wrapTextToWidth(
+        callout.text,
+        calloutSize,
+        maximumBoxWidth - calloutPaddingX * 2,
+      );
+      const longestLine = Math.max(...wrapped.split('\n').map((line) => Array.from(line).length));
+      const boxWidth = Math.min(
+        maximumBoxWidth,
+        Math.round(longestLine * calloutSize * 0.62 + calloutPaddingX * 2),
+      );
+      const boxHeight = textBlockHeight(wrapped, calloutSize) + calloutPaddingY * 2;
+      const calloutSafeMargin = Math.max(12, Math.round(Math.min(width, height) * 0.025));
+      const x = clamp(requestedX, calloutSafeMargin, width - calloutSafeMargin - boxWidth);
+      const y = clamp(requestedY, calloutSafeMargin, height - calloutSafeMargin - boxHeight);
       const calloutColor = callout.accent ? color(callout.accent, `callout ${callout.text}`) : accent;
       const boxLabel = `calloutBox${labelIndex++}`;
       filters.push(
@@ -417,8 +487,8 @@ export function buildFfmpegComposition(options: CompositionOptions): FfmpegCompo
         text: wrapped,
         color: 'white',
         size: calloutSize,
-        x: x + 14,
-        y: y + 8,
+        x: x + calloutPaddingX,
+        y: y + calloutPaddingY,
         start: calloutStart,
         end: calloutEnd,
       });
