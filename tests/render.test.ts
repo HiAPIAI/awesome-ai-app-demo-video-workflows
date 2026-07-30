@@ -49,24 +49,11 @@ test('render CLI keeps the frozen argument names', () => {
 test('renders repeatable landscape and portrait H.264/AAC outputs with review artifacts', async () => {
   const fixtureDirectory = await mkdtemp(join(tmpdir(), 'app-demo-render-fixture-'));
   try {
-    const firstImage = join(fixtureDirectory, 'screen-a.png');
+    const firstImage = join(fixtureDirectory, 'screen-a.svg');
     const secondImage = join(fixtureDirectory, 'screen-b.png');
     const audioPath = join(fixtureDirectory, 'tone.wav');
-    await command('ffmpeg', [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      'testsrc2=size=640x360:rate=24',
-      '-frames:v',
-      '1',
-      '-threads',
-      '1',
-      firstImage,
-    ]);
+    const sourceSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="640" height="360" fill="#1769aa"/><circle cx="320" cy="180" r="96" fill="#f6c445"/></svg>';
+    await writeFile(firstImage, sourceSvg, 'utf8');
     await command('ffmpeg', [
       '-hide_banner',
       '-loglevel',
@@ -112,7 +99,7 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
         fontFamily: 'Arial',
       },
       assets: [
-        {id: 'screen-a', type: 'image', path: 'screen-a.png', width: 640, height: 360, ...firstRecord},
+        {id: 'screen-a', type: 'image', path: 'screen-a.svg', width: 640, height: 360, ...firstRecord},
         {id: 'screen-b', type: 'image', path: 'screen-b.png', width: 640, height: 360, ...secondRecord},
         {id: 'tone', type: 'audio', path: 'tone.wav', durationSeconds: 1, ...audioRecord},
       ],
@@ -218,6 +205,16 @@ test('renders repeatable landscape and portrait H.264/AAC outputs with review ar
     const checklist = await readFile(join(firstOutput, 'review-checklist.md'), 'utf8');
     assert.match(checklist, /No generative pass redrew UI or text/);
     await access(join(firstOutput, 'render-report.json'));
+
+    await writeFile(firstImage, sourceSvg.replace('#1769aa', '#aa1769'), 'utf8');
+    await assert.rejects(
+      renderProject({
+        compiledPath,
+        outputDirectory: join(fixtureDirectory, 'render-tampered'),
+        workingDirectory: fixtureDirectory,
+      }),
+      /SHA-256 differs/,
+    );
   } finally {
     await rm(fixtureDirectory, {recursive: true, force: true});
   }
