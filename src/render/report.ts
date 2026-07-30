@@ -13,7 +13,6 @@ export interface RenderedOutputReport {
   review: ReviewArtifacts;
   features: CompositionFeatures;
 }
-
 export interface RenderReport {
   schemaVersion: 'render-report-v1';
   projectId: string;
@@ -59,4 +58,3 @@ export async function writeReviewChecklist(outputDirectory: string, report: Rend
   lines.push('');
   await writeFile(join(outputDirectory, 'review-checklist.md'), `${lines.join('\n')}\n`, 'utf8');
 }
-

@@ -6,7 +6,6 @@ import type {CompiledAsset, CompiledDemoV1} from '../contracts/types.js';
 export interface ResolvedAsset extends CompiledAsset {
   absolutePath: string;
 }
-
 function isInside(root: string, target: string): boolean {
   const pathFromRoot = relative(root, target);
   return pathFromRoot === '' || (!pathFromRoot.startsWith('..') && !isAbsolute(pathFromRoot));
@@ -72,4 +71,3 @@ export async function resolveAndVerifyAssets(
 
   return resolvedAssets;
 }
-

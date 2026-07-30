@@ -51,4 +51,3 @@ export function createCursorRgba(): Uint8Array {
 }
 
 export const CURSOR_RGBA_SIZE = CURSOR_SIZE;
-
