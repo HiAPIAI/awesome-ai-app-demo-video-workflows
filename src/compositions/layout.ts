@@ -4,7 +4,6 @@ export interface ContentRect {
   width: number;
   height: number;
 }
-
 function even(value: number): number {
   return Math.max(2, Math.floor(value / 2) * 2);
 }
@@ -52,4 +51,3 @@ export function comparisonRects(width: number, height: number): [ContentRect, Co
     },
   ];
 }
-

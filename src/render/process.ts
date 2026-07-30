@@ -4,7 +4,6 @@ export interface ProcessResult {
   stdout: string;
   stderr: string;
 }
-
 export async function runProcess(
   command: string,
   args: readonly string[],
@@ -40,4 +39,3 @@ export async function runProcess(
     });
   });
 }
-
