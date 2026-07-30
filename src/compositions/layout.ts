@@ -44,6 +44,10 @@ function even(value: number): number {
   return Math.max(2, Math.floor(value / 2) * 2);
 }
 
+function nearestEven(value: number): number {
+  return Math.max(2, Math.round(value / 2) * 2);
+}
+
 function bounded(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
@@ -167,14 +171,14 @@ function wrapTextToWidth(value: string, fontSize: number, availableWidth: number
 export function layoutTextBlock(value: string, fontSize: number, availableWidth: number): TextBlockLayout {
   const lines = wrapTextToWidth(value, fontSize, availableWidth);
   const lineSpacing = Math.max(4, Math.round(fontSize * 0.25));
-  const lineHeight = fontSize + lineSpacing;
+  const lineHeight = Math.ceil(fontSize * 1.3) + lineSpacing;
   return {
     text: lines.join('\n'),
     fontSize,
     lineSpacing,
     lineHeight,
     lineCount: lines.length,
-    height: fontSize * lines.length + lineSpacing * Math.max(0, lines.length - 1),
+    height: fontSize + lineHeight * Math.max(0, lines.length - 1),
     maximumLineWidth: Math.max(...lines.map((line) => estimatedTextWidth(line, fontSize))),
   };
 }
@@ -216,12 +220,19 @@ export function titleTextLayout(width: number, height: number, heading: string, 
   };
 }
 
-export function screenRect(width: number, height: number, sourceAspectRatio = width / height): ContentRect {
+export function screenRect(
+  width: number,
+  height: number,
+  sourceAspectRatio = width / height,
+  focusedPortrait = true,
+): ContentRect {
   const portrait = height > width;
   const contentWidth = even(width * (portrait ? 0.88 : 0.82));
   const portraitLandscapeSource = portrait && sourceAspectRatio > 1;
   const contentHeight = portraitLandscapeSource
-    ? even(Math.min(height * 0.72, contentWidth / 0.8))
+    ? (focusedPortrait
+      ? even(Math.min(height * 0.72, contentWidth / 0.8))
+      : nearestEven(Math.min(height * 0.72, contentWidth / sourceAspectRatio)))
     : even(height * (portrait ? 0.72 : 0.76));
   return {
     x: Math.floor((width - contentWidth) / 2),
