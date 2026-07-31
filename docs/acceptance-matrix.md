@@ -1,14 +1,14 @@
 # Render acceptance matrix
 
-This is the execution ledger for the first integrated render pass. It does not certify any workflow by itself. Every catalog entry remains `spec-only` until all declared outputs for that workflow pass both machine and full-video human review.
+This is the execution ledger for the first integrated render pass. A catalog entry is `verified` only after all declared outputs for that workflow pass both machine and full-video human review.
 
 ## Integration gate
 
 - Rejected first-pass baseline: integration `d3a8c34c333d035a8d32848441203cb1e78ddd4d`, content merge `b3decf1c584651ed10eeaf5ef0f991f8c4f97089`, and frozen sample source commit `f36e38f58082de76eb9604509c7bb05b38232bd3`.
 - Final candidate: integration `2e06275660043b36c5442db298c808f8fd661e71` with workflow source commit `46fd48487fd85e614045886372a0c4dee6fd8db6`.
 - All five examples pass `validate -> compile -> render`; all seven outputs pass structural probe and complete decode. Node.js 20 and 22 CI pass at the final candidate commit.
-- Machine acceptance and frame-by-frame visual review are complete. Full normal-speed playback and normal-volume audio review remain required before status promotion or release merge.
-- Workflow status remains independent from integration: do not promote any entry until its declared outputs pass the gates below.
+- Machine acceptance, frame-by-frame visual review, full normal-speed playback, and normal-volume audio review are complete. The release owner approved the videos and the main release on 2026-07-31.
+- All five workflows passed every declared gate and were promoted from `spec-only` to `verified` after that approval.
 
 ## Declared outputs
 
@@ -16,13 +16,13 @@ The suite contains five workflows, seven outputs, 2,010 frames, and 67 seconds o
 
 | Workflow | Output ID | File | Required media | Audio | Current state |
 | --- | --- | --- | --- | --- | --- |
-| SaaS Feature Launch | `landscape` | `saas-feature-launch-landscape.mp4` | 1920x1080, 30 fps, 330 frames / 11s | Four-track local mix, no narration | Machine pass; playback/audio review pending |
-| SaaS Feature Launch | `vertical` | `saas-feature-launch-vertical.mp4` | 1080x1920, 30 fps, 330 frames / 11s | Same locked mix and cue frames | Machine pass; playback/audio review pending |
-| Mobile Onboarding | `vertical` | `mobile-onboarding-vertical.mp4` | 1080x1920, 30 fps, 300 frames / 10s | No source audio tracks | Machine pass; playback review pending |
-| AI Workflow Demo | `landscape` | `ai-workflow-demo-landscape.mp4` | 1920x1080, 30 fps, 360 frames / 12s | No source audio tracks | Machine pass; playback review pending |
-| Before / After Comparison | `landscape` | `before-after-comparison-landscape.mp4` | 1920x1080, 30 fps, 240 frames / 8s | No source audio tracks | Machine pass; playback review pending |
-| Before / After Comparison | `vertical` | `before-after-comparison-vertical.mp4` | 1080x1920, 30 fps, 240 frames / 8s | No source audio tracks | Machine pass; playback review pending |
-| Vertical Social Feature | `vertical` | `vertical-social-feature.mp4` | 1080x1920, 30 fps, 210 frames / 7s | No source audio tracks | Machine pass; playback review pending |
+| SaaS Feature Launch | `landscape` | `saas-feature-launch-landscape.mp4` | 1920x1080, 30 fps, 330 frames / 11s | Four-track local mix, no narration | Verified: machine, playback, and audio review pass |
+| SaaS Feature Launch | `vertical` | `saas-feature-launch-vertical.mp4` | 1080x1920, 30 fps, 330 frames / 11s | Same locked mix and cue frames | Verified: machine, playback, and audio review pass |
+| Mobile Onboarding | `vertical` | `mobile-onboarding-vertical.mp4` | 1080x1920, 30 fps, 300 frames / 10s | No source audio tracks | Verified: machine and playback review pass |
+| AI Workflow Demo | `landscape` | `ai-workflow-demo-landscape.mp4` | 1920x1080, 30 fps, 360 frames / 12s | No source audio tracks | Verified: machine and playback review pass |
+| Before / After Comparison | `landscape` | `before-after-comparison-landscape.mp4` | 1920x1080, 30 fps, 240 frames / 8s | No source audio tracks | Verified: machine and playback review pass |
+| Before / After Comparison | `vertical` | `before-after-comparison-vertical.mp4` | 1080x1920, 30 fps, 240 frames / 8s | No source audio tracks | Verified: machine and playback review pass |
+| Vertical Social Feature | `vertical` | `vertical-social-feature.mp4` | 1080x1920, 30 fps, 210 frames / 7s | No source audio tracks | Verified: machine and playback review pass |
 
 ## Machine acceptance
 
@@ -54,13 +54,13 @@ The ignored evidence directory is `outputs/acceptance-f36e38f/saas-feature-launc
 
 | Output file | Integration SHA | MP4 SHA-256 | Probe/decode | Audio facts | Determinism | Human review | Final decision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `saas-feature-launch-landscape.mp4` | `2e06275` / content `46fd484` | `7fe3ef03504e51df2260b84e9ad31075ce07ca43b4ccdd72b8d5f28946dc3d4b` | Pass: 1920x1080, 330f/11s, H.264/yuv420p + AAC 48 kHz; full decode | Pass machine limits: -22.3 LUFS, 2.5 LU LRA, -11.9 dBFS TP; listening pending | Pass: repeated MP4 and first/middle/last frames match | Frame audit pass; full playback/audio review pending | `spec-only` |
-| `saas-feature-launch-vertical.mp4` | `2e06275` / content `46fd484` | `5a0a17fc910b988ea1eb2f52933df89848e25eaca861cfb589e4b04a974cd312` | Pass: 1080x1920, 330f/11s, H.264/yuv420p + AAC 48 kHz; full decode | Pass machine limits: -22.3 LUFS, 2.5 LU LRA, -11.9 dBFS TP; listening pending | Pass: repeated MP4 and first/middle/last frames match | Frame audit pass; full playback/audio review pending | `spec-only` |
-| `mobile-onboarding-vertical.mp4` | `2e06275` / content `46fd484` | `edf2987e7198b951800e35a02503ca7828d47bc0d0a762d64d8284e8c98badb3` | Pass: 1080x1920, 300f/10s, H.264/yuv420p, no audio; full decode | N/A | Not required | Frame audit pass; full playback review pending | `spec-only` |
-| `ai-workflow-demo-landscape.mp4` | `2e06275` / content `46fd484` | `707585b2835a3c9cbd64ca00dafaefa66f06a1d868b6b07ad6d7ff0c91b691c5` | Pass: 1920x1080, 360f/12s, H.264/yuv420p, no audio; full decode | N/A | Not required | Frame audit pass; full playback review pending | `spec-only` |
-| `before-after-comparison-landscape.mp4` | `2e06275` / content `46fd484` | `0520567c86fc994269705da75f4eb95e0e05cee5c7989f7f1ab16f7eb5490695` | Pass: 1920x1080, 240f/8s, H.264/yuv420p, no audio; full decode | N/A | Not required | Frame audit pass; full playback review pending | `spec-only` |
-| `before-after-comparison-vertical.mp4` | `2e06275` / content `46fd484` | `69f3f037bf876aa9ea861224876e16c6e4e9873473dea31543ab39a2f2977e80` | Pass: 1080x1920, 240f/8s, H.264/yuv420p, no audio; full decode | N/A | Not required | Frame audit pass; full playback review pending | `spec-only` |
-| `vertical-social-feature.mp4` | `2e06275` / content `46fd484` | `07749c030bef3eae409c36d0bc71bc14e8eb080bb8051a6ea8b4663b06c60047` | Pass: 1080x1920, 210f/7s, H.264/yuv420p, no audio; full decode | N/A | Not required | Frame audit pass; full playback review pending | `spec-only` |
+| `saas-feature-launch-landscape.mp4` | `2e06275` / content `46fd484` | `7fe3ef03504e51df2260b84e9ad31075ce07ca43b4ccdd72b8d5f28946dc3d4b` | Pass: 1920x1080, 330f/11s, H.264/yuv420p + AAC 48 kHz; full decode | Pass: -22.3 LUFS, 2.5 LU LRA, -11.9 dBFS TP; normal-volume review approved | Pass: repeated MP4 and first/middle/last frames match | Pass: frame audit and full playback/audio review | `verified` |
+| `saas-feature-launch-vertical.mp4` | `2e06275` / content `46fd484` | `5a0a17fc910b988ea1eb2f52933df89848e25eaca861cfb589e4b04a974cd312` | Pass: 1080x1920, 330f/11s, H.264/yuv420p + AAC 48 kHz; full decode | Pass: -22.3 LUFS, 2.5 LU LRA, -11.9 dBFS TP; normal-volume review approved | Pass: repeated MP4 and first/middle/last frames match | Pass: frame audit and full playback/audio review | `verified` |
+| `mobile-onboarding-vertical.mp4` | `2e06275` / content `46fd484` | `edf2987e7198b951800e35a02503ca7828d47bc0d0a762d64d8284e8c98badb3` | Pass: 1080x1920, 300f/10s, H.264/yuv420p, no audio; full decode | N/A | Not required | Pass: frame audit and full playback review | `verified` |
+| `ai-workflow-demo-landscape.mp4` | `2e06275` / content `46fd484` | `707585b2835a3c9cbd64ca00dafaefa66f06a1d868b6b07ad6d7ff0c91b691c5` | Pass: 1920x1080, 360f/12s, H.264/yuv420p, no audio; full decode | N/A | Not required | Pass: frame audit and full playback review | `verified` |
+| `before-after-comparison-landscape.mp4` | `2e06275` / content `46fd484` | `0520567c86fc994269705da75f4eb95e0e05cee5c7989f7f1ab16f7eb5490695` | Pass: 1920x1080, 240f/8s, H.264/yuv420p, no audio; full decode | N/A | Not required | Pass: frame audit and full playback review | `verified` |
+| `before-after-comparison-vertical.mp4` | `2e06275` / content `46fd484` | `69f3f037bf876aa9ea861224876e16c6e4e9873473dea31543ab39a2f2977e80` | Pass: 1080x1920, 240f/8s, H.264/yuv420p, no audio; full decode | N/A | Not required | Pass: frame audit and full playback review | `verified` |
+| `vertical-social-feature.mp4` | `2e06275` / content `46fd484` | `07749c030bef3eae409c36d0bc71bc14e8eb080bb8051a6ea8b4663b06c60047` | Pass: 1080x1920, 210f/7s, H.264/yuv420p, no audio; full decode | N/A | Not required | Pass: frame audit and full playback review | `verified` |
 
 ### Final candidate evidence
 
@@ -81,8 +81,8 @@ The ignored evidence roots are `outputs/acceptance-46fd484/` and `outputs/accept
 | Before / After Comparison | Both states use matched content and framing; the comparison is honest; labels remain visible; vertical adaptation does not hide evidence. |
 | Vertical Social Feature | Hook, one interaction, and result remain readable at phone size; captions stay inside marked social safe margins; no real platform chrome is misrepresented. |
 
-Reviewers must watch each complete video at normal speed and intended display size, then complete the example's `review-checklist.md`. Contact sheets and individual frames support review but cannot replace it.
+Reviewers must watch each complete video at normal speed and intended display size, then complete the example's `review-checklist.md`. Contact sheets and individual frames support review but cannot replace it. The release owner completed and approved this review on 2026-07-31.
 
 ## Status promotion
 
-Do not edit `data/workflows.json` during the first sample pass. A workflow can leave `spec-only` only after every declared output has machine evidence and signed human review. Passing the two SaaS outputs alone proves the sample pipeline; it does not promote the other four workflows or the catalog as a whole.
+All five workflows were promoted from `spec-only` to `verified` after every declared output received machine evidence and full-video human approval. `verified` applies only to the frozen local assets, manifests, render pipeline, and hashes recorded above; it does not authorize a paid HiAPI request or certify future source changes.
