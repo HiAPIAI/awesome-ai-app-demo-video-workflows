@@ -41,6 +41,7 @@
     "@motion-canvas/core": "3.17.2",
     "@motion-canvas/ffmpeg": "3.17.2",
     "ajv": "8.17.1",
+    "sharp": "0.35.3",
     "yaml": "2.8.1"
   },
   "devDependencies": {
